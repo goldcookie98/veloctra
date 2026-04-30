@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.3.3</div>
+<div id="version-tag">v1.3.5</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -188,6 +188,24 @@ renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.physicallyCorrectLights = true;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
+
+// Generate a minimal environment map so PBR metallic materials show colour.
+// Without this, metallic surfaces reflect nothing and appear black.
+(function buildEnvMap() {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  // 4-pixel equirectangular: top row = bright sky, bottom row = dark ground
+  const px = new Float32Array([
+    2.4, 3.0, 4.0, 1,  2.4, 3.0, 4.0, 1,   // sky (cool blue-white)
+    0.04,0.04,0.08,1,  0.04,0.04,0.08,1,   // ground (near-black)
+  ]);
+  const tex = new THREE.DataTexture(px, 2, 2, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.needsUpdate = true;
+  scene.environment = pmrem.fromEquirectangular(tex).texture;
+  pmrem.dispose(); tex.dispose();
+})();
+
 const SKY = 0x00010f;
 renderer.setClearColor(SKY);
 const scene  = new THREE.Scene();
