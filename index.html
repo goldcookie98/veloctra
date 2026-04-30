@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.4</div>
+<div id="version-tag">v1.4.5</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -187,7 +187,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.physicallyCorrectLights = true;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 0.85;
 
 const SKY = 0x00010f;
 renderer.setClearColor(SKY);
@@ -218,10 +218,10 @@ function resize() {
 resize(); window.addEventListener('resize', resize);
 
 // ── Lighting ──────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-scene.add(new THREE.HemisphereLight(0xffeeff, 0x223344, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 2.5); sun.position.set(80, 200, 80); scene.add(sun);
-const fill = new THREE.DirectionalLight(0x8899ff, 0.8); fill.position.set(-100, 60, -80); scene.add(fill);
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+scene.add(new THREE.HemisphereLight(0xffeeff, 0x223344, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(80, 200, 80); scene.add(sun);
+const fill = new THREE.DirectionalLight(0x8899ff, 0.5); fill.position.set(-100, 60, -80); scene.add(fill);
 
 // ── Starfield ─────────────────────────────────────────────────────
 (function() {
@@ -496,21 +496,18 @@ let carModelReady = false;
     // Model already faces +Z — no rotation needed
 
     carRoot.add(model);
-    // Fix PBR materials: zero out metalness so textures/colours show without HDR env map.
-    // Also add a small emissive so the car is never pitch-black even in shadow.
+    // Fix PBR materials: zero metalness so textures render with diffuse colour only.
     model.traverse(child => {
       if (!child.isMesh) return;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       mats.forEach(m => {
         if (!m) return;
         if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
-          const col = m.color ? m.color.clone() : new THREE.Color(0.8, 0.1, 0.1);
           m.metalness        = 0.0;
-          m.roughness        = 0.6;
+          m.roughness        = 0.55;
           m.envMapIntensity  = 0.0;
-          // Emit a fraction of the base colour so darkness can't hide it
-          m.emissive         = col.clone().multiplyScalar(0.25);
-          m.emissiveIntensity = 1.0;
+          m.emissive         = new THREE.Color(0, 0, 0);
+          m.emissiveIntensity = 0;
           m.needsUpdate      = true;
         }
       });
