@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.0</div>
+<div id="version-tag">v1.4.1</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -275,6 +275,80 @@ let splinePoints = [];
 let roadMesh     = null;    // single merged road mesh — used for raycasting
 const trackGroup = new THREE.Group(); scene.add(trackGroup);
 
+// ── Road piece tiling (modular road pack) ─────────────────────────
+const roadTileGroup = new THREE.Group(); scene.add(roadTileGroup);
+let roadPieceTemplate = null;   // cloned per-segment
+let roadPieceLen  = 10;         // measured length of one piece
+let roadPieceRot  = 0;          // extra Y rotation if piece runs along X
+
+new GLTFLoader().load('./road.glb', gltf => {
+  // Find the largest-footprint non-cylinder mesh — that's the road surface
+  let best = null, bestArea = 0;
+  gltf.scene.traverse(o => {
+    if (!o.isMesh || /cyl/i.test(o.name)) return;
+    const b = new THREE.Box3().setFromObject(o);
+    const s = b.getSize(new THREE.Vector3());
+    if (s.x * s.z > bestArea) { bestArea = s.x * s.z; best = o; }
+  });
+  if (!best && gltf.scene.children.length) best = gltf.scene.children[0];
+  if (!best) return;
+
+  // Fix encoding on textures so colours are correct
+  best.traverse(o => {
+    if (o.isMesh) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m => {
+        if (m.map) { m.map.encoding = THREE.sRGBEncoding; m.map.needsUpdate = true; }
+        m.needsUpdate = true;
+      });
+    }
+  });
+
+  // Measure piece: determine which axis is forward
+  const b = new THREE.Box3().setFromObject(best);
+  const s = b.getSize(new THREE.Vector3());
+  const c = b.getCenter(new THREE.Vector3());
+  const xFwd = s.x > s.z;
+  roadPieceLen = xFwd ? s.x : s.z;
+  roadPieceRot = xFwd ? Math.PI / 2 : 0;
+
+  // Normalise: centre the mesh at local origin and sit bottom on Y=0
+  best.position.sub(c);
+  best.position.y += s.y / 2;
+
+  roadPieceTemplate = best;
+  if (splinePoints.length) tileRoadPieces();
+}, undefined, e => console.warn('road.glb load error', e));
+
+function tileRoadPieces() {
+  while (roadTileGroup.children.length) roadTileGroup.remove(roadTileGroup.children[0]);
+  if (!roadPieceTemplate || !splinePoints.length) return;
+
+  const n   = splinePoints.length;
+  // Scale piece so its width matches track width
+  const b   = new THREE.Box3().setFromObject(roadPieceTemplate);
+  const s   = b.getSize(new THREE.Vector3());
+  const pieceWid = roadPieceRot ? s.z : s.x;
+  const scale = TRACK_WIDTH / pieceWid;
+  const step  = roadPieceLen * scale * 0.98; // tiny overlap to avoid gaps
+
+  let acc = step; // trigger first placement immediately
+  for (let i = 0; i < n - 1; i++) {
+    acc += splinePoints[i].distanceTo(splinePoints[i + 1]);
+    if (acc < step) continue;
+    acc -= step;
+
+    const piece = roadPieceTemplate.clone();
+    piece.scale.setScalar(scale);
+    const p   = splinePoints[i];
+    const q   = splinePoints[(i + 1) % n];
+    const dir = new THREE.Vector3().subVectors(q, p).normalize();
+    piece.position.set(p.x, p.y, p.z);
+    piece.rotation.y = Math.atan2(dir.x, dir.z) + roadPieceRot;
+    roadTileGroup.add(piece);
+  }
+}
+
 function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
 
 function buildSpline(wpts) {
@@ -330,6 +404,7 @@ function buildTrack(wpts) {
   rGeo.setIndex(ri);
   rGeo.computeVertexNormals();
   const rm = new THREE.Mesh(rGeo, mRoad);
+  rm.visible = false; // hidden — used only for raycasting, road.glb tiles are the visual
   trackGroup.add(rm);
   roadMesh = rm;   // ← raycaster target
 
@@ -677,7 +752,7 @@ function resetCar() {
 
 function startRace(idx) {
   activeTrack=idx; const track=TRACKS[idx];
-  buildTrack(track.waypoints); setupCheckpoints(); setupMinimap();
+  buildTrack(track.waypoints); setupCheckpoints(); setupMinimap(); tileRoadPieces();
   scene.fog=null;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
