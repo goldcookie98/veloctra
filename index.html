@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.2</div>
+<div id="version-tag">v1.4.3</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -496,18 +496,22 @@ let carModelReady = false;
     // Model already faces +Z — no rotation needed
 
     carRoot.add(model);
-    // Force diffuse colour — PBR metallic is black without a full env map
+    // Rip out ALL GLB materials and replace with guaranteed-visible ones.
+    // PBR metallic materials are black without a full HDR env map — just nuke them.
+    const bodyMat  = new THREE.MeshPhongMaterial({ color: 0xcc1111, shininess: 90, specular: 0x441111 });
+    const glassMat = new THREE.MeshPhongMaterial({ color: 0x223344, shininess: 120, transparent: true, opacity: 0.55 });
+    const tyreMat  = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 20 });
+    const rimMat   = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 140 });
     model.traverse(child => {
       if (!child.isMesh) return;
-      const mats = Array.isArray(child.material) ? child.material : [child.material];
-      mats.forEach(m => {
-        if (m.isMeshStandardMaterial) {
-          m.metalness  = 0.05;
-          m.roughness  = 0.65;
-          m.envMapIntensity = 0;
-          m.needsUpdate = true;
-        }
-      });
+      const name = (child.name || '').toLowerCase();
+      const origColor = child.material && child.material.color ? child.material.color.getHex() : -1;
+      let mat;
+      if (/glass|wind|window|visor/i.test(name)) mat = glassMat;
+      else if (/tyre|tire|wheel_r|rubber/i.test(name)) mat = tyreMat;
+      else if (/rim|hub|alloy|brake/i.test(name)) mat = rimMat;
+      else mat = bodyMat;
+      child.material = mat;
     });
     carModelReady = true;
   }, undefined, err => console.error('GLB load error:', err));
@@ -679,10 +683,16 @@ function updateCamera(dt) {
   const cfg = CAM_CFG[settings.camera];
   const ic  = settings.camera === 'cockpit';
   // Use a fixed lerp speed so the camera never falls behind at high speed
-  const posLerp  = ic ? 0.95 : Math.min(1, dt * 28);
-  const lookLerp = ic ? 0.85 : Math.min(1, dt * 32);
-  camPos.lerp(carState.pos.clone().add(cfg.off.clone().applyQuaternion(q)),  posLerp);
-  camLook.lerp(carState.pos.clone().add(cfg.look.clone().applyQuaternion(q)), lookLerp);
+  // Cockpit gets slight smoothing; chase/high snap directly so camera never lags
+  const targetPos  = carState.pos.clone().add(cfg.off.clone().applyQuaternion(q));
+  const targetLook = carState.pos.clone().add(cfg.look.clone().applyQuaternion(q));
+  if (ic) {
+    camPos.lerp(targetPos,  0.92);
+    camLook.lerp(targetLook, 0.88);
+  } else {
+    camPos.copy(targetPos);
+    camLook.copy(targetLook);
+  }
   camera.position.copy(camPos);
   camera.lookAt(camLook);
 }
