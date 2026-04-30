@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.3</div>
+<div id="version-tag">v1.4.4</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -496,22 +496,24 @@ let carModelReady = false;
     // Model already faces +Z — no rotation needed
 
     carRoot.add(model);
-    // Rip out ALL GLB materials and replace with guaranteed-visible ones.
-    // PBR metallic materials are black without a full HDR env map — just nuke them.
-    const bodyMat  = new THREE.MeshPhongMaterial({ color: 0xcc1111, shininess: 90, specular: 0x441111 });
-    const glassMat = new THREE.MeshPhongMaterial({ color: 0x223344, shininess: 120, transparent: true, opacity: 0.55 });
-    const tyreMat  = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 20 });
-    const rimMat   = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 140 });
+    // Fix PBR materials: zero out metalness so textures/colours show without HDR env map.
+    // Also add a small emissive so the car is never pitch-black even in shadow.
     model.traverse(child => {
       if (!child.isMesh) return;
-      const name = (child.name || '').toLowerCase();
-      const origColor = child.material && child.material.color ? child.material.color.getHex() : -1;
-      let mat;
-      if (/glass|wind|window|visor/i.test(name)) mat = glassMat;
-      else if (/tyre|tire|wheel_r|rubber/i.test(name)) mat = tyreMat;
-      else if (/rim|hub|alloy|brake/i.test(name)) mat = rimMat;
-      else mat = bodyMat;
-      child.material = mat;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      mats.forEach(m => {
+        if (!m) return;
+        if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
+          const col = m.color ? m.color.clone() : new THREE.Color(0.8, 0.1, 0.1);
+          m.metalness        = 0.0;
+          m.roughness        = 0.6;
+          m.envMapIntensity  = 0.0;
+          // Emit a fraction of the base colour so darkness can't hide it
+          m.emissive         = col.clone().multiplyScalar(0.25);
+          m.emissiveIntensity = 1.0;
+          m.needsUpdate      = true;
+        }
+      });
     });
     carModelReady = true;
   }, undefined, err => console.error('GLB load error:', err));
