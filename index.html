@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.3.6</div>
+<div id="version-tag">v1.3.7</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -189,15 +189,19 @@ renderer.physicallyCorrectLights = true;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 
+const SKY = 0x00010f;
+renderer.setClearColor(SKY);
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(SKY);
+
 // Generate a minimal environment map so PBR metallic materials show colour.
-// Without this, metallic surfaces reflect nothing and appear black.
+// Must run AFTER scene is created. Without this, metallic surfaces appear black.
 (function buildEnvMap() {
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
-  // 4-pixel equirectangular: top row = bright sky, bottom row = dark ground
   const px = new Float32Array([
-    2.4, 3.0, 4.0, 1,  2.4, 3.0, 4.0, 1,   // sky (cool blue-white)
-    0.04,0.04,0.08,1,  0.04,0.04,0.08,1,   // ground (near-black)
+    2.4, 3.0, 4.0, 1,  2.4, 3.0, 4.0, 1,
+    0.04,0.04,0.08,1,  0.04,0.04,0.08,1,
   ]);
   const tex = new THREE.DataTexture(px, 2, 2, THREE.RGBAFormat, THREE.FloatType);
   tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -205,11 +209,6 @@ renderer.toneMappingExposure = 1.2;
   scene.environment = pmrem.fromEquirectangular(tex).texture;
   pmrem.dispose(); tex.dispose();
 })();
-
-const SKY = 0x00010f;
-renderer.setClearColor(SKY);
-const scene  = new THREE.Scene();
-scene.background = new THREE.Color(SKY);
 const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 3000);
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
