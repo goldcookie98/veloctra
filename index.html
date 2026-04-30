@@ -209,10 +209,10 @@ grid.position.y = 0.02; grid.material.opacity = 0.22; grid.material.transparent 
 
 // ── CANNON world ──────────────────────────────────────────────────
 const world = new CANNON.World();
-world.gravity.set(0, -28, 0);
+world.gravity.set(0, -20, 0);
 world.broadphase = new CANNON.SAPBroadphase(world);
 world.allowSleep = false;
-world.defaultContactMaterial.friction    = 0.4;
+world.defaultContactMaterial.friction    = 0.6;
 world.defaultContactMaterial.restitution = 0.02;
 
 // Ground plane (infinite fallback)
@@ -412,13 +412,14 @@ function createVehicle(startPt, heading) {
   if (vehicle)     vehicle.removeFromWorld(world);
   if (chassisBody) world.removeBody(chassisBody);
 
-  chassisBody = new CANNON.Body({ mass: 620 }); // F1 car ~800 kg with driver
-  // Chassis box: very low to keep centre of mass on the floor
-  chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.85, 0.18, 2.0)), new CANNON.Vec3(0, 0.0, 0));
-  chassisBody.position.set(startPt.x, startPt.y + 1.5, startPt.z);
+  // Lighter mass so suspension stiffness values are sane
+  chassisBody = new CANNON.Body({ mass: 150 });
+  // Wider, slightly taller box — more stable, less likely to tip
+  chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.28, 2.1)), new CANNON.Vec3(0, 0.12, 0));
+  chassisBody.position.set(startPt.x, startPt.y + 1.0, startPt.z);
   chassisBody.quaternion.setFromEuler(0, heading, 0);
-  chassisBody.angularDamping = 0.85;  // high — resists rolling
-  chassisBody.linearDamping  = 0.02;
+  chassisBody.angularDamping = 0.95;  // very high — suppresses roll/pitch oscillation
+  chassisBody.linearDamping  = 0.05;
   world.addBody(chassisBody);
 
   vehicle = new CANNON.RaycastVehicle({
@@ -431,28 +432,29 @@ function createVehicle(startPt, heading) {
   const wBase = {
     radius:            0.34,
     directionLocal:    new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness:    52,
-    suspensionRestLength:   0.55,
-    frictionSlip:           1.6,
-    dampingRelaxation:      2.5,
-    dampingCompression:     5.0,
-    maxSuspensionForce:     250000,
-    rollInfluence:          0.01,   // very low — prevents flipping
+    suspensionStiffness:    35,   // tuned for mass:150, gravity:-20
+    suspensionRestLength:   0.35,
+    frictionSlip:           1.5,
+    dampingRelaxation:      2.3,
+    dampingCompression:     4.5,
+    maxSuspensionForce:     150000,
+    rollInfluence:          0.005, // near-zero — absolutely prevents flipping
     axleLocal:         new CANNON.Vec3(1, 0, 0),
-    maxSuspensionTravel:    0.35,
+    maxSuspensionTravel:    0.3,
     customSlidingRotationalSpeed: -30,
     useCustomSlidingRotationalSpeed: true,
   };
 
   // F1 wide track — front wider than rear
-  [[-1.10, -0.08,  1.55],  // FL
-   [ 1.10, -0.08,  1.55],  // FR
-   [-1.00, -0.08, -1.45],  // RL
-   [ 1.00, -0.08, -1.45],  // RR
+  [[-1.10, -0.12,  1.55],  // FL
+   [ 1.10, -0.12,  1.55],  // FR
+   [-1.00, -0.12, -1.45],  // RL
+   [ 1.00, -0.12, -1.45],  // RR
   ].forEach(([x,y,z]) => vehicle.addWheel({ ...wBase, chassisConnectionPointLocal: new CANNON.Vec3(x,y,z) }));
 
   vehicle.addToWorld(world);
-  world.step(1/60, 0, 1); // prime wheel positions
+  // Let physics settle for a few steps so wheels have valid positions
+  for (let i = 0; i < 5; i++) world.step(1/60, 1/60, 3);
 }
 
 // ── Input ─────────────────────────────────────────────────────────
@@ -520,19 +522,21 @@ function resolveWall() {
   }
 }
 
-// ── Respawn (mid-race reset without restarting lap timer) ─────────
+// ── Respawn — always go back to the track START ───────────────────
 function respawnCar() {
   if(!chassisBody||!splinePoints.length) return;
-  const idx = nearestSegIdx;
-  const pt  = splinePoints[idx];
-  const ptN = splinePoints[(idx+1)%splinePoints.length];
-  const dir = new THREE.Vector3().subVectors(ptN,pt).normalize();
-  chassisBody.position.set(pt.x, pt.y+1.8, pt.z);
-  chassisBody.velocity.set(0,0,0);
-  chassisBody.angularVelocity.set(0,0,0);
-  chassisBody.quaternion.setFromEuler(0, Math.atan2(dir.x,dir.z), 0);
-  for(let i=0;i<4;i++){vehicle.applyEngineForce(0,i);vehicle.setBrake(0,i);}
-  carState.steer=0;
+  // Always respawn at spawn point (index 0), facing the right direction
+  const pt  = splinePoints[0];
+  const ptN = splinePoints[Math.min(4, splinePoints.length - 1)];
+  const dir = new THREE.Vector3().subVectors(ptN, pt).normalize();
+  const heading = Math.atan2(dir.x, dir.z);
+  chassisBody.position.set(pt.x, pt.y + 1.0, pt.z);
+  chassisBody.velocity.set(0, 0, 0);
+  chassisBody.angularVelocity.set(0, 0, 0);
+  chassisBody.quaternion.setFromEuler(0, heading, 0);
+  for (let i = 0; i < 4; i++) { vehicle.applyEngineForce(0, i); vehicle.setBrake(0, i); }
+  carState.steer = 0;
+  nearestSegIdx = 0;
 }
 
 // ── Camera ────────────────────────────────────────────────────────
@@ -603,7 +607,7 @@ const showScreen=id=>SCREEN_IDS.forEach(s=>document.getElementById(s).classList.
 const hideAllScreens=()=>SCREEN_IDS.forEach(s=>document.getElementById(s).classList.add('hidden'));
 
 function resetCar() {
-  const p0=splinePoints[0], p1=splinePoints[Math.min(8,splinePoints.length-1)];
+  const p0=splinePoints[0], p1=splinePoints[Math.min(4,splinePoints.length-1)];
   const dir=new THREE.Vector3().subVectors(p1,p0).normalize();
   const heading=Math.atan2(dir.x,dir.z);
   createVehicle(p0, heading);
@@ -668,10 +672,10 @@ document.getElementById('btn-menu').addEventListener('click',returnToMenu);
 document.getElementById('btn-reset-car').addEventListener('click',()=>{ if(racing||gameOver) respawnCar(); });
 
 // ── Physics update ────────────────────────────────────────────────
-const MAX_ENGINE_FORCE = 5500;
-const MAX_BRAKE_FORCE  = 140;
-const MAX_STEER        = 0.36;   // reduced — less twitchy
-const MAX_KMH          = 310;
+const MAX_ENGINE_FORCE = 1800;  // tuned for mass:150
+const MAX_BRAKE_FORCE  = 80;
+const MAX_STEER        = 0.52;
+const MAX_KMH          = 260;
 
 function updatePhysics(dt) {
   if (!vehicle) return;
@@ -713,7 +717,7 @@ function updatePhysics(dt) {
   // ── Aerodynamic downforce — glues car at speed, prevents flipping
   if (chassisBody) {
     const vx=chassisBody.velocity.x, vz=chassisBody.velocity.z;
-    const downforce = (vx*vx + vz*vz) * 5.5; // proportional to horizontal speed²
+    const downforce = (vx*vx + vz*vz) * 1.2; // scaled for mass:150
     chassisBody.applyForce(new CANNON.Vec3(0,-downforce,0), chassisBody.position);
   }
 
