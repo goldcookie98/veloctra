@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.3.7</div>
+<div id="version-tag">v1.4.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -356,6 +356,31 @@ function buildTrack(wpts) {
     addQuad([rT0, rT1, rO1, rO0], mTrimR);
   }
 
+  // ── Barriers / railings along both edges ─────────────────────
+  const BARRIER_H = 0.9;
+  const mBarW = new THREE.MeshLambertMaterial({ color: 0xfafafa, flatShading: true, side: THREE.DoubleSide });
+  const mBarR = new THREE.MeshLambertMaterial({ color: 0xcc1111, flatShading: true, side: THREE.DoubleSide });
+  const blvW=[],bliW=[],blvR=[],bliR=[];
+  const brvW=[],briW=[],brvR=[],briR=[];
+  for (let i = 0; i < n-1; i++) {
+    const stripe = Math.floor(i / 5) % 2; // alternate every 5 segments
+    const L0=lefts[i],  L1=lefts[i+1];
+    const R0=rights[i], R1=rights[i+1];
+    const LT0=new THREE.Vector3(L0.x,L0.y+BARRIER_H,L0.z);
+    const LT1=new THREE.Vector3(L1.x,L1.y+BARRIER_H,L1.z);
+    const RT0=new THREE.Vector3(R0.x,R0.y+BARRIER_H,R0.z);
+    const RT1=new THREE.Vector3(R1.x,R1.y+BARRIER_H,R1.z);
+    const lv=stripe?blvR:blvW, li=stripe?bliR:bliW;
+    const rv=stripe?brvR:brvW, ri=stripe?briR:briW;
+    const lb=lv.length/3; [L0,L1,LT0,LT1].forEach(p=>lv.push(p.x,p.y,p.z));
+    li.push(lb,lb+1,lb+2, lb+1,lb+3,lb+2);
+    const rb=rv.length/3; [R0,R1,RT0,RT1].forEach(p=>rv.push(p.x,p.y,p.z));
+    ri.push(rb,rb+2,rb+1, rb+1,rb+2,rb+3);
+  }
+  const mkBGeo=(v,i,m)=>{if(!i.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(i);g.computeVertexNormals();trackGroup.add(new THREE.Mesh(g,m));};
+  mkBGeo(blvW,bliW,mBarW); mkBGeo(blvR,bliR,mBarR);
+  mkBGeo(brvW,briW,mBarW); mkBGeo(brvR,briR,mBarR);
+
   // ── Start/finish stripe ───────────────────────────────────────
   const sf=new THREE.Vector3().subVectors(pts[1],pts[0]).normalize();
   const sr=new THREE.Vector3().crossVectors(sf,new THREE.Vector3(0,1,0)).normalize();
@@ -508,7 +533,7 @@ function fmtTime(ms) {
   return`${Math.floor(ms/60000)}:${String(Math.floor((ms%60000)/1000)).padStart(2,'0')}.${String(Math.floor(ms%1000)).padStart(3,'0')}`;
 }
 
-// ── Wall push-back (spline lateral check) ─────────────────────────
+// ── Wall bounce ───────────────────────────────────────────────────
 function resolveWall() {
   if (!splinePoints.length) return;
   const n   = splinePoints.length;
@@ -519,10 +544,20 @@ function resolveWall() {
   const lat   = new THREE.Vector3(car.pos.x-cen.x, 0, car.pos.z-cen.z).dot(right);
   const lim   = TRACK_WIDTH / 2 - 0.4;
   if (Math.abs(lat) > lim) {
+    // Push car back inside the barrier
     const excess = Math.abs(lat) - lim;
     car.pos.x -= right.x * Math.sign(lat) * excess * 1.8;
     car.pos.z -= right.z * Math.sign(lat) * excess * 1.8;
-    car.speed *= 0.6;
+    // Bounce: reflect heading off the wall normal (inward-facing)
+    const wallNormal = right.clone().multiplyScalar(-Math.sign(lat));
+    const vel = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
+    const dot = vel.dot(wallNormal);
+    if (dot < 0) {
+      // Reflect with restitution 0.55 — real bounce, not sticky glue
+      vel.addScaledVector(wallNormal, -2 * dot * 0.55);
+      car.heading = Math.atan2(vel.x, vel.z);
+      car.speed *= 0.78; // lose ~22% speed on impact
+    }
   }
 }
 
