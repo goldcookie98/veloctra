@@ -418,8 +418,11 @@ function createVehicle(startPt, heading) {
   chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.28, 2.1)), new CANNON.Vec3(0, 0.12, 0));
   chassisBody.position.set(startPt.x, startPt.y + 1.0, startPt.z);
   chassisBody.quaternion.setFromEuler(0, heading, 0);
-  chassisBody.angularDamping = 0.95;  // very high — suppresses roll/pitch oscillation
+  chassisBody.angularDamping = 0.95;
   chassisBody.linearDamping  = 0.05;
+  // Lock pitch & roll — only yaw (Y) is allowed to change freely.
+  // This is how arcade racers stay flat; suspension provides visual dip.
+  chassisBody.angularFactor = new CANNON.Vec3(0.0, 1.0, 0.0);
   world.addBody(chassisBody);
 
   vehicle = new CANNON.RaycastVehicle({
@@ -446,10 +449,10 @@ function createVehicle(startPt, heading) {
   };
 
   // F1 wide track — front wider than rear
-  [[-1.10, -0.12,  1.55],  // FL
-   [ 1.10, -0.12,  1.55],  // FR
-   [-1.00, -0.12, -1.45],  // RL
-   [ 1.00, -0.12, -1.45],  // RR
+  [[-1.10, 0,  1.55],  // FL
+   [ 1.10, 0,  1.55],  // FR
+   [-1.00, 0, -1.45],  // RL
+   [ 1.00, 0, -1.45],  // RR
   ].forEach(([x,y,z]) => vehicle.addWheel({ ...wBase, chassisConnectionPointLocal: new CANNON.Vec3(x,y,z) }));
 
   vehicle.addToWorld(world);
@@ -690,28 +693,27 @@ function updatePhysics(dt) {
   vehicle.setSteeringValue( carState.steer, 0);
   vehicle.setSteeringValue( carState.steer, 1);
 
-  // Throttle: progressive torque curve
+  // Throttle: AWD — all 4 wheels driven equally so there's no pitch torque
   if (inputAccel()) {
     const factor = Math.max(0, 1 - absKmh / MAX_KMH);
     const force  = -MAX_ENGINE_FORCE * factor;
-    vehicle.applyEngineForce(force, 2); vehicle.applyEngineForce(force, 3);
+    for (let i = 0; i < 4; i++) vehicle.applyEngineForce(force, i);
   } else {
-    vehicle.applyEngineForce(0, 2); vehicle.applyEngineForce(0, 3);
+    for (let i = 0; i < 4; i++) vehicle.applyEngineForce(0, i);
   }
 
   // Brake / reverse
   if (inputBrake()) {
     if (kmh > 2) {
-      for (let i=0;i<4;i++) vehicle.setBrake(MAX_BRAKE_FORCE, i);
-      vehicle.applyEngineForce(0,2); vehicle.applyEngineForce(0,3);
+      for (let i=0;i<4;i++) { vehicle.setBrake(MAX_BRAKE_FORCE, i); vehicle.applyEngineForce(0, i); }
     } else {
-      for (let i=0;i<4;i++) vehicle.setBrake(0,i);
-      vehicle.applyEngineForce(MAX_ENGINE_FORCE*0.3,2); vehicle.applyEngineForce(MAX_ENGINE_FORCE*0.3,3);
+      for (let i=0;i<4;i++) vehicle.setBrake(0, i);
+      for (let i=0;i<4;i++) vehicle.applyEngineForce(MAX_ENGINE_FORCE * 0.3, i);
     }
   } else if (!inputAccel()) {
-    for (let i=0;i<4;i++) vehicle.setBrake(10,i); // light drag
+    for (let i=0;i<4;i++) vehicle.setBrake(10, i); // light coast drag
   } else {
-    for (let i=0;i<4;i++) vehicle.setBrake(0,i);
+    for (let i=0;i<4;i++) vehicle.setBrake(0, i);
   }
 
   // ── Aerodynamic downforce — glues car at speed, prevents flipping
