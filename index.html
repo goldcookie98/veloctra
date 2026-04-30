@@ -355,7 +355,7 @@ let carModelReady = false;
 
 (function loadCarModel() {
   const loader = new GLTFLoader();
-  loader.load('./car.glb', (gltf) => {
+  loader.load('./car.glb?v=r35', (gltf) => {
     const model = gltf.scene;
 
     // Scale so the longest axis = 4.5 units (good race-car size on the track)
