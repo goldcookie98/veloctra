@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v0.6.0</div>
+<div id="version-tag">v0.7.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -252,7 +252,7 @@ function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
 
 function buildSpline(wpts) {
   const curve = new THREE.CatmullRomCurve3(wpts.map(v3), true, 'catmullrom', 0.5);
-  return curve.getPoints(wpts.length * 14);
+  return curve.getPoints(wpts.length * 22); // more points = gentler slope per segment
 }
 
 function addQuad([a,b,c,d], mat) {
@@ -341,28 +341,34 @@ function buildTrack(wpts) {
     addQuad([a,b,b.clone().addScaledVector(sf,3),a.clone().addScaledVector(sf,3)],mStart);
   }
 
-  // ── CANNON physics: flat boxes positioned flush under road surface
-  //    Very thick (yHalf=6) so car can never fall through.
-  //    Top face sits right at road surface (no protrusion = no bounce launches).
-  const yHalf = 6.0;
-  for (let i = 0; i < n-1; i++) {
-    const p0=pts[i], p1=pts[i+1];
-    const mx=(p0.x+p1.x)*0.5, my=(p0.y+p1.y)*0.5, mz=(p0.z+p1.z)*0.5;
-    const dx=p1.x-p0.x, dy=p1.y-p0.y, dz=p1.z-p0.z;
+  // ── CANNON physics ────────────────────────────────────────────────
+  // Group every STEP spline points into one physics box.
+  // Fewer boxes = fewer seams = no invisible walls between segments.
+  // Each box is TILTED to match the slope so its top face IS the road
+  // surface — no protrusion, no step-up walls, no launching.
+  const STEP  = 5;   // spline points per physics box
+  const yHalf = 6.0; // half-thickness — car can never fall through
+  for (let i = 0; i < n-1; i += STEP) {
+    const end = Math.min(i + STEP, n - 1);
+    const p0  = pts[i], p1 = pts[end];
+    const dx  = p1.x-p0.x, dy = p1.y-p0.y, dz = p1.z-p0.z;
     const len = Math.sqrt(dx*dx+dy*dy+dz*dz) || 0.001;
-    // Use a purely horizontal box — no tilt rotation.
-    // Slight slope compensation is handled by thick Y extent.
+    const dir = new THREE.Vector3(dx,dy,dz).divideScalar(len);
+
+    // Tilt the box so local-Z aligns with the slope direction
+    const q  = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), dir);
+    // "up" is now the surface normal of the tilted box
+    const up = new THREE.Vector3(0,1,0).applyQuaternion(q);
+
+    const mx = (p0.x+p1.x)*0.5, my = (p0.y+p1.y)*0.5, mz = (p0.z+p1.z)*0.5;
+
     const body = new CANNON.Body({ mass: 0 });
-    body.addShape(new CANNON.Box(new CANNON.Vec3(hw+3, yHalf, (len*0.9)+0.5)));
-    // Position so the TOP FACE of the box is at the road surface (my).
-    // Centre is yHalf below the road midpoint.
-    body.position.set(mx, my - yHalf, mz);
-    // Align the Z-axis of the box to the horizontal projection of the segment
-    const hDir = new THREE.Vector3(dx, 0, dz).normalize();
-    if (hDir.lengthSq() > 0.001) {
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), hDir);
-      body.quaternion.set(q.x, q.y, q.z, q.w);
-    }
+    // Z half-extent: half the span + 1 unit overlap on each side → no gaps
+    body.addShape(new CANNON.Box(new CANNON.Vec3(hw+4, yHalf, len*0.5+1.0)));
+    // Shift centre DOWN along the surface normal so the top face lands exactly
+    // on the road surface (top = centre + up*yHalf = mid ✓)
+    body.position.set(mx - up.x*yHalf, my - up.y*yHalf, mz - up.z*yHalf);
+    body.quaternion.set(q.x, q.y, q.z, q.w);
     world.addBody(body); trackBodies.push(body);
   }
 }
@@ -465,11 +471,11 @@ function createVehicle(startPt, heading) {
   if (vehicle)     vehicle.removeFromWorld(world);
   if (chassisBody) world.removeBody(chassisBody);
 
-  // Lighter mass so suspension stiffness values are sane
   chassisBody = new CANNON.Body({ mass: 150 });
-  // Wider, slightly taller box — more stable, less likely to tip
-  chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.28, 2.1)), new CANNON.Vec3(0, 0.12, 0));
-  chassisBody.position.set(startPt.x, startPt.y + 1.0, startPt.z);
+  // Shorter Z so the underside doesn't catch on ramp edges.
+  // Shape offset pushes the box UP so CoM sits lower (more stable).
+  chassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.9, 0.22, 1.5)), new CANNON.Vec3(0, 0.22, 0));
+  chassisBody.position.set(startPt.x, startPt.y + 1.2, startPt.z);
   chassisBody.quaternion.setFromEuler(0, heading, 0);
   chassisBody.angularDamping = 0.95;
   chassisBody.linearDamping  = 0.05;
@@ -488,15 +494,15 @@ function createVehicle(startPt, heading) {
   const wBase = {
     radius:            0.34,
     directionLocal:    new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness:    35,   // tuned for mass:150, gravity:-20
-    suspensionRestLength:   0.35,
+    suspensionStiffness:    28,
+    suspensionRestLength:   0.55,  // longer rest = car rides higher, clears more bumps
     frictionSlip:           1.5,
-    dampingRelaxation:      2.3,
-    dampingCompression:     4.5,
+    dampingRelaxation:      2.0,
+    dampingCompression:     3.5,
     maxSuspensionForce:     150000,
-    rollInfluence:          0.005, // near-zero — absolutely prevents flipping
+    rollInfluence:          0.005,
     axleLocal:         new CANNON.Vec3(1, 0, 0),
-    maxSuspensionTravel:    0.3,
+    maxSuspensionTravel:    0.55,  // more travel = absorbs steps without bouncing
     customSlidingRotationalSpeed: -30,
     useCustomSlidingRotationalSpeed: true,
   };
@@ -586,7 +592,7 @@ function respawnCar() {
   const ptN = splinePoints[Math.min(4, splinePoints.length - 1)];
   const dir = new THREE.Vector3().subVectors(ptN, pt).normalize();
   const heading = Math.atan2(dir.x, dir.z);
-  chassisBody.position.set(pt.x, pt.y + 1.0, pt.z);
+  chassisBody.position.set(pt.x, pt.y + 1.2, pt.z);
   chassisBody.velocity.set(0, 0, 0);
   chassisBody.angularVelocity.set(0, 0, 0);
   chassisBody.quaternion.setFromEuler(0, heading, 0);
