@@ -184,6 +184,10 @@ const TRACKS = [
 // ── THREE renderer ────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas'), antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.physicallyCorrectLights = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
 const SKY = 0x00010f;
 renderer.setClearColor(SKY);
 const scene  = new THREE.Scene();
@@ -197,9 +201,10 @@ function resize() {
 resize(); window.addEventListener('resize', resize);
 
 // ── Lighting ──────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0x8090c0, 1.2));
-const sun = new THREE.DirectionalLight(0xfff0e0, 3.0); sun.position.set(100, 200, 80); scene.add(sun);
-const fill = new THREE.DirectionalLight(0x4060ff, 0.6); fill.position.set(-100, -40, -80); scene.add(fill);
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+scene.add(new THREE.HemisphereLight(0xffeeff, 0x223344, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.5); sun.position.set(80, 200, 80); scene.add(sun);
+const fill = new THREE.DirectionalLight(0x8899ff, 0.8); fill.position.set(-100, 60, -80); scene.add(fill);
 
 // ── Starfield ─────────────────────────────────────────────────────
 (function() {
@@ -371,8 +376,7 @@ let carModelReady = false;
     box.getCenter(center);
     model.position.set(-center.x, -box.min.y, -center.z);
 
-    // Rotate 180° so the car faces the game-forward direction (+Z)
-    model.rotation.y = Math.PI;
+    // Model already faces +Z — no rotation needed
 
     carRoot.add(model);
     carModelReady = true;
