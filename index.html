@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.2.0</div>
+<div id="version-tag">v1.3.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -135,6 +135,7 @@
 
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
 
 // ── Settings ──────────────────────────────────────────────────────
 const settings = { fog: true, camera: 'chase', laps: 3 };
@@ -336,68 +337,56 @@ function buildTrack(wpts) {
   }
 }
 
-// ── F1 car visual ─────────────────────────────────────────────────
-const carBodyGroup = new THREE.Group(); carBodyGroup.visible = false; scene.add(carBodyGroup);
-const wheelMeshGroups = [];
-const wheelRots = [0,0,0,0];
+// ── Car model (GLB) ───────────────────────────────────────────────
+// carRoot is the single object positioned/rotated each frame.
+// The GLB is loaded once at startup and stays as a child permanently.
+const carRoot = new THREE.Group();
+carRoot.visible = false;
+scene.add(carRoot);
 
-function darken(c,f){ return (Math.floor(((c>>16)&0xff)*f)<<16)|(Math.floor(((c>>8)&0xff)*f)<<8)|Math.floor((c&0xff)*f); }
+let carModelReady = false;
 
-function buildCar(color, wingColor) {
-  while (carBodyGroup.children.length) carBodyGroup.remove(carBodyGroup.children[0]);
-  wheelMeshGroups.forEach(wg => scene.remove(wg)); wheelMeshGroups.length = 0; wheelRots.fill(0);
+(function loadCarModel() {
+  const loader = new GLTFLoader();
+  loader.load('./car.glb', (gltf) => {
+    const model = gltf.scene;
 
-  const mBody  = new THREE.MeshLambertMaterial({ color,                     flatShading: true });
-  const mDark  = new THREE.MeshLambertMaterial({ color: darken(color,0.55), flatShading: true });
-  const mWing  = new THREE.MeshLambertMaterial({ color: wingColor,           flatShading: true });
-  const mCrbn  = new THREE.MeshLambertMaterial({ color: 0x111111,            flatShading: true });
-  const mHalo  = new THREE.MeshLambertMaterial({ color: 0xddaa00,            flatShading: true });
-  const mTire  = new THREE.MeshLambertMaterial({ color: 0x111111,            flatShading: true });
-  const mRim   = new THREE.MeshLambertMaterial({ color: 0xdddddd,            flatShading: true });
-  const mHelmet= new THREE.MeshLambertMaterial({ color: 0xffffff,            flatShading: true });
+    // Auto-compute bounding box so we can scale the car to a known size
+    const box = new THREE.Box3().setFromObject(model);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const longestAxis = Math.max(size.x, size.y, size.z);
+    // Target: car should be ~4 units long (visible but not huge)
+    const targetSize = 4.0;
+    const scaleFactor = targetSize / longestAxis;
+    model.scale.setScalar(scaleFactor);
 
-  const p = (geo,mat,x,y,z) => {
-    const m = new THREE.Mesh(geo,mat); m.position.set(x,y,z); carBodyGroup.add(m);
-  };
+    // Recompute box after scale to center model at origin
+    box.setFromObject(model);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    model.position.sub(center);          // center XZ
+    model.position.y -= box.min.y * scaleFactor; // sit on Y=0
 
-  p(new THREE.BoxGeometry(0.95, 0.22, 4.2),  mBody,    0,  0.11, -0.15);
-  p(new THREE.BoxGeometry(0.42, 0.16, 1.5),  mBody,    0,  0.06,  2.05);
-  p(new THREE.BoxGeometry(0.22, 0.10, 0.6),  mBody,    0,  0.02,  2.95);
-  p(new THREE.BoxGeometry(0.32, 0.30, 1.6),  mBody,  -0.88, 0.10, -0.05);
-  p(new THREE.BoxGeometry(0.32, 0.30, 1.6),  mBody,   0.88, 0.10, -0.05);
-  p(new THREE.BoxGeometry(0.60, 0.08, 0.75), mDark,   0, 0.26,  0.42);
-  p(new THREE.BoxGeometry(0.38, 0.18, 0.55), mCrbn,   0, 0.28,  0.40);
-  p(new THREE.BoxGeometry(0.06, 0.22, 0.06), mHalo, -0.25, 0.36, 0.60);
-  p(new THREE.BoxGeometry(0.06, 0.22, 0.06), mHalo,  0.25, 0.36, 0.60);
-  p(new THREE.BoxGeometry(0.56, 0.06, 0.06), mHalo,  0,    0.48, 0.60);
-  p(new THREE.BoxGeometry(0.30, 0.26, 0.32), mHelmet, 0, 0.42, 0.32);
-  p(new THREE.BoxGeometry(0.28, 0.10, 0.10), new THREE.MeshLambertMaterial({color:0x88ccff,flatShading:true}), 0, 0.44, 0.48);
-  p(new THREE.BoxGeometry(0.55, 0.32, 1.20), mDark,   0, 0.28, -1.10);
-  p(new THREE.BoxGeometry(0.10, 0.40, 0.90), mCrbn,   0, 0.50, -1.00);
-  p(new THREE.BoxGeometry(1.80, 0.05, 3.90), mCrbn,   0, -0.04, -0.10);
-  p(new THREE.BoxGeometry(1.20, 0.14, 0.45), mCrbn,   0, -0.02, -2.30);
-  p(new THREE.BoxGeometry(2.20, 0.06, 0.50), mWing,   0, -0.10, 2.70);
-  p(new THREE.BoxGeometry(2.00, 0.05, 0.35), mWing,   0, -0.05, 2.48);
-  p(new THREE.BoxGeometry(0.05, 0.18, 0.55), mCrbn, -1.10, -0.03, 2.70);
-  p(new THREE.BoxGeometry(0.05, 0.18, 0.55), mCrbn,  1.10, -0.03, 2.70);
-  p(new THREE.BoxGeometry(1.90, 0.07, 0.28), mWing,   0,  0.80, -2.20);
-  p(new THREE.BoxGeometry(1.70, 0.05, 0.22), mWing,   0,  0.60, -2.18);
-  p(new THREE.BoxGeometry(0.10, 0.38, 0.12), mCrbn,  0.55, 0.60, -2.20);
-  p(new THREE.BoxGeometry(0.10, 0.38, 0.12), mCrbn, -0.55, 0.60, -2.20);
-  p(new THREE.BoxGeometry(0.05, 0.38, 0.30), mCrbn, -0.96, 0.63, -2.20);
-  p(new THREE.BoxGeometry(0.05, 0.38, 0.30), mCrbn,  0.96, 0.63, -2.20);
+    // Flat shading gives a nice low-poly look even on smooth meshes
+    model.traverse(child => {
+      if (child.isMesh) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => { m.flatShading = true; m.needsUpdate = true; });
+        } else {
+          child.material.flatShading = true;
+          child.material.needsUpdate = true;
+        }
+      }
+    });
 
-  for (let i = 0; i < 4; i++) {
-    const wg = new THREE.Group();
-    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.44, 14), mTire);
-    tire.rotation.z = Math.PI / 2; wg.add(tire);
-    const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.46, 8), mRim);
-    rim.rotation.z = Math.PI / 2; wg.add(rim);
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.10, 8),
-      new THREE.MeshLambertMaterial({color:0x333333,flatShading:true}));
-    disc.rotation.z = Math.PI / 2; wg.add(disc);
-    wg.visible = false; scene.add(wg); wheelMeshGroups.push(wg);
-  }
+    carRoot.add(model);
+    carModelReady = true;
+  }, undefined, err => console.error('GLB load error:', err));
+})();
+
+function showCar(visible) {
+  carRoot.visible = visible;
 }
 
 // ── Kinematic car — raycaster surface detection ───────────────────
@@ -535,17 +524,17 @@ function respawnCar() {
   offTrackTime = 0;
   nearestSegIdx = 0;
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), car.heading);
-  camPos.copy(car.pos).add(new THREE.Vector3(0,8,-18).applyQuaternion(q));
-  camLook.copy(car.pos).add(new THREE.Vector3(0,1,8).applyQuaternion(q));
+  camPos.copy(car.pos).add(new THREE.Vector3(0,5,-10).applyQuaternion(q));
+  camLook.copy(car.pos).add(new THREE.Vector3(0,1,6).applyQuaternion(q));
 }
 
 // ── Camera ────────────────────────────────────────────────────────
 let camPos  = new THREE.Vector3(0,40,100);
 let camLook = new THREE.Vector3();
 const CAM_CFG = {
-  chase:   { off: new THREE.Vector3(0, 5.5,-14), look: new THREE.Vector3(0,1.2,12) },
-  high:    { off: new THREE.Vector3(0, 24, -28), look: new THREE.Vector3(0,0.0,18) },
-  cockpit: { off: new THREE.Vector3(0, 1.6, 0.8),look: new THREE.Vector3(0,1.6,14) },
+  chase:   { off: new THREE.Vector3(0,  4,  -9), look: new THREE.Vector3(0, 0.8,  6) },
+  high:    { off: new THREE.Vector3(0, 16, -20), look: new THREE.Vector3(0, 0.0, 12) },
+  cockpit: { off: new THREE.Vector3(0,  1.8, 0.6), look: new THREE.Vector3(0, 1.8, 12) },
 };
 function updateCamera(dt) {
   const q   = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, carState.heading, 0));
@@ -627,16 +616,15 @@ function resetCar() {
   surfNormal.set(0, 1, 0);
   offTrackTime = 0;
   nearestSegIdx = 0; lastSegment = 0; cpPassed.fill(false);
-  carBodyGroup.visible = true; wheelMeshGroups.forEach(wg => wg.visible = true);
+  showCar(true);
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), car.heading);
-  camPos.copy(car.pos).add(new THREE.Vector3(0,8,-18).applyQuaternion(q));
-  camLook.copy(car.pos).add(new THREE.Vector3(0,1,8).applyQuaternion(q));
+  camPos.copy(car.pos).add(new THREE.Vector3(0,5,-10).applyQuaternion(q));
+  camLook.copy(car.pos).add(new THREE.Vector3(0,1,6).applyQuaternion(q));
 }
 
 function startRace(idx) {
   activeTrack=idx; const track=TRACKS[idx];
   buildTrack(track.waypoints); setupCheckpoints(); setupMinimap();
-  buildCar(track.carColor, track.wingColor);
   scene.fog=settings.fog?new THREE.FogExp2(SKY,0.0018):null;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
@@ -657,8 +645,7 @@ function endRace() {
   document.getElementById('hud').style.display='none';
 }
 function returnToMenu() {
-  racing=false; gameOver=false; carBodyGroup.visible=false;
-  wheelMeshGroups.forEach(wg=>wg.visible=false);
+  racing=false; gameOver=false; showCar(false);
   document.getElementById('hud').style.display='none'; scene.fog=null; showScreen('screen-menu');
 }
 function showCountdown(cb) {
@@ -760,22 +747,9 @@ function updateCar(dt) {
   const bodyQ = new THREE.Quaternion().multiplyQuaternions(headQ, tiltQ);
   bodyQ.premultiply(leanQ);
 
-  carBodyGroup.position.copy(car.pos);
-  carBodyGroup.quaternion.copy(bodyQ);
-
-  // ── Wheels ────────────────────────────────────────────────────
-  const wOffs    = [[-1.05,-0.44,0.90],[1.05,-0.44,0.90],[-1.00,-0.44,-0.90],[1.00,-0.44,-0.90]];
-  const spinDelta = car.speed / 0.34 * dt;
-  wOffs.forEach(([wx,wy,wz], i) => {
-    const wg = wheelMeshGroups[i];
-    wg.position.copy(car.pos).add(new THREE.Vector3(wx,wy,wz).applyQuaternion(bodyQ));
-    wg.quaternion.copy(bodyQ);
-    if (i < 2) wg.quaternion.multiply(
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), car.steer));
-    wheelRots[i] -= spinDelta;
-    wg.quaternion.multiply(
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), wheelRots[i]));
-  });
+  // ── Apply to GLB car root ─────────────────────────────────────
+  carRoot.position.copy(car.pos);
+  carRoot.quaternion.copy(bodyQ);
 
   // ── Dynamic FOV — warp effect at high speed ───────────────────
   const targetFOV = 65 + (absSpd / MAX_SPEED) * 22;
