@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.3.0</div>
+<div id="version-tag">v1.3.3</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -358,34 +358,21 @@ let carModelReady = false;
   loader.load('./car.glb', (gltf) => {
     const model = gltf.scene;
 
-    // Auto-compute bounding box so we can scale the car to a known size
+    // Scale so the longest axis = 4.5 units (good race-car size on the track)
     const box = new THREE.Box3().setFromObject(model);
     const size = new THREE.Vector3();
     box.getSize(size);
-    const longestAxis = Math.max(size.x, size.y, size.z);
-    // Target: car should be ~4 units long (visible but not huge)
-    const targetSize = 4.0;
-    const scaleFactor = targetSize / longestAxis;
+    const scaleFactor = 4.5 / Math.max(size.x, size.y, size.z);
     model.scale.setScalar(scaleFactor);
 
-    // Recompute box after scale to center model at origin
+    // Re-measure after scaling, then center XZ and sit bottom on Y=0
     box.setFromObject(model);
     const center = new THREE.Vector3();
     box.getCenter(center);
-    model.position.sub(center);          // center XZ
-    model.position.y -= box.min.y * scaleFactor; // sit on Y=0
+    model.position.set(-center.x, -box.min.y, -center.z);
 
-    // Flat shading gives a nice low-poly look even on smooth meshes
-    model.traverse(child => {
-      if (child.isMesh) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach(m => { m.flatShading = true; m.needsUpdate = true; });
-        } else {
-          child.material.flatShading = true;
-          child.material.needsUpdate = true;
-        }
-      }
-    });
+    // Rotate 180° so the car faces the game-forward direction (+Z)
+    model.rotation.y = Math.PI;
 
     carRoot.add(model);
     carModelReady = true;
