@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v0.5.0</div>
+<div id="version-tag">v0.6.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -143,33 +143,33 @@ const settings = { fog: true, camera: 'chase', laps: 3 };
 // ── Tracks ────────────────────────────────────────────────────────
 const TRACKS = [
   {
-    name: 'Circuit Alpha', desc: 'Technical layout with\nelevation changes', tag: 'TECHNICAL',
-    carColor: 0x00d2be,   // Mercedes teal
+    name: 'Pulsar Station', desc: 'Technical flow through\nfloating space platforms', tag: 'TECHNICAL',
+    carColor: 0x00d2be,
     wingColor: 0x111111,
     waypoints: [
-      [  0,0,  0],[40,0,  0],[80,0,  0],[110,0, 20],[120,0,50],[110,0,80],
-      [ 80,2,100],[50,4,100],[20,5,100],[-10,6, 80],[-30,6,60],[-50,6,40],
-      [-60,7, 20],[-60,8,  0],[-60,6,-20],[-50,3,-40],[-20,1,-50],[10,0,-40],[30,0,-20],[20,0,-10],
+      [  0, 0,  0],[28, 0,-10],[58, 0,-14],[82, 3, -4],[92, 8, 18],
+      [ 84,13, 42],[62,16, 58],[32,16, 62],[  4,13, 54],[-16, 9, 36],
+      [-20, 4, 14],[-10, 1, -2],
     ]
   },
   {
-    name: 'Oval Rush', desc: 'Banked high-speed oval.\nFlat-out from start to finish', tag: 'HIGH SPEED',
-    carColor: 0xe8002d,   // Ferrari red
+    name: 'Celestia Ring', desc: 'High-speed orbit around\na collapsed star', tag: 'HIGH SPEED',
+    carColor: 0xe8002d,
     wingColor: 0xffff00,
     waypoints: [
-      [  0,0,  0],[35,0,  0],[70,0,  0],[ 95,1,18],[112,2,45],[115,2,72],
-      [110,1, 98],[90,0,116],[60,0,124],[30,0,124],[  0,0,124],[-30,0,116],
-      [-50,1, 98],[-55,2, 72],[-50,2, 45],[-30,1,18],
+      [  0, 0,  0],[38, 0,  8],[70, 2, 20],[90, 7, 42],[94,13, 68],
+      [ 80,17, 94],[55,19,108],[24,17,106],[ -4,13, 92],[-18, 8, 68],
+      [-18, 3, 40],[ -4, 0, 18],
     ]
   },
   {
-    name: 'Mountain Pass', desc: 'Twisty switchbacks with\ndramatic elevation changes', tag: 'ENDURANCE',
-    carColor: 0x006f62,   // Aston Martin green
-    wingColor: 0x00ff88,
+    name: 'Dark Matter', desc: 'Tight switchbacks with\nmassive void drops', tag: 'ENDURANCE',
+    carColor: 0x9b59b6,
+    wingColor: 0xe056fd,
     waypoints: [
-      [  0,0,  0],[18,0,22],[38,2,36],[58,5,30],[72,8,10],[66,11,-12],
-      [ 50,13,-26],[28,13,-20],[8,12,-6],[-8,9,12],[-22,7,22],[-32,3,10],
-      [-34,1,-6],[-22,0,-20],[-6,0,-16],
+      [  0, 0,  0],[22, 2, 22],[38, 7, 32],[44,14, 22],[34,19,  4],
+      [ 12,22,-14],[-8,20,-24],[-14,15,-16],[-8, 9,  0],[  4, 4, 12],
+      [ 12, 1,  8],
     ]
   }
 ];
@@ -177,7 +177,7 @@ const TRACKS = [
 // ── THREE renderer ────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas'), antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-const SKY = 0x7ec8e3;
+const SKY = 0x00010f;
 renderer.setClearColor(SKY);
 const scene  = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
@@ -185,28 +185,50 @@ const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1200);
 function resize() { renderer.setSize(window.innerWidth, window.innerHeight); camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); }
 resize(); window.addEventListener('resize', resize);
 
-// ── Lighting ──────────────────────────────────────────────────────
-scene.add(new THREE.AmbientLight(0xffffff, 2.2));
-const sun = new THREE.DirectionalLight(0xfffae8, 2.4); sun.position.set(80, 160, 60); scene.add(sun);
-const fill = new THREE.DirectionalLight(0xc0deff, 1.0); fill.position.set(-80, 60, -60); scene.add(fill);
+// ── Lighting — space: dim ambient + harsh directional star ────────
+scene.add(new THREE.AmbientLight(0x8090c0, 1.2));
+const sun = new THREE.DirectionalLight(0xfff0e0, 3.0); sun.position.set(100, 200, 80); scene.add(sun);
+const fill = new THREE.DirectionalLight(0x4060ff, 0.6); fill.position.set(-100, -40, -80); scene.add(fill);
 
-// ── Ground ────────────────────────────────────────────────────────
-const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(1400,1400), new THREE.MeshLambertMaterial({ color: 0x4caf69 }));
-groundMesh.rotation.x = -Math.PI / 2; scene.add(groundMesh);
-const grid = new THREE.GridHelper(1400, 70, 0x3d9955, 0x3d9955);
-grid.position.y = 0.02; grid.material.opacity = 0.22; grid.material.transparent = true; scene.add(grid);
-
-// ── Mountains ─────────────────────────────────────────────────────
+// ── Starfield ─────────────────────────────────────────────────────
 (function() {
-  const pal = [0x5a7060,0x6a8a6a,0x7a9a78,0x55695a,0x8aaa80];
-  for (let i = 0; i < 32; i++) {
-    const angle = (i/32)*Math.PI*2 + Math.random()*0.3, dist = 260+Math.random()*130, h = 50+Math.random()*90;
-    const geo = new THREE.ConeGeometry(24+Math.random()*22, h, 5+Math.floor(Math.random()*4));
-    const pos = geo.attributes.position;
-    for (let v = 0; v < pos.count; v++) { pos.setX(v, pos.getX(v)+(Math.random()-0.5)*9); pos.setZ(v, pos.getZ(v)+(Math.random()-0.5)*9); }
+  const pos = [];
+  for (let i = 0; i < 6000; i++) {
+    const r = 600 + Math.random() * 800;
+    const θ = Math.random() * Math.PI * 2;
+    const φ = Math.acos(2 * Math.random() - 1);
+    pos.push(r*Math.sin(φ)*Math.cos(θ), r*Math.cos(φ), r*Math.sin(φ)*Math.sin(θ));
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: true })));
+})();
+
+// ── Distant space objects (nebulae / asteroids) ───────────────────
+(function() {
+  const palettes = [
+    [0x2a1a4a, 0x3a1060, 0x1a0a30],   // deep purple nebula
+    [0x0a1a3a, 0x0a2040, 0x051020],   // cold blue nebula
+    [0x3a1a1a, 0x501010, 0x200a0a],   // red giant
+  ];
+  for (let i = 0; i < 22; i++) {
+    const angle = (i / 22) * Math.PI * 2 + Math.random() * 0.4;
+    const dist  = 320 + Math.random() * 200;
+    const y     = (Math.random() - 0.5) * 300;
+    const r     = 30 + Math.random() * 60;
+    const pal   = palettes[i % palettes.length];
+    const geo   = new THREE.DodecahedronGeometry(r, 0);
+    const vp    = geo.attributes.position;
+    for (let v = 0; v < vp.count; v++) {
+      vp.setX(v, vp.getX(v) + (Math.random()-0.5)*r*0.4);
+      vp.setY(v, vp.getY(v) + (Math.random()-0.5)*r*0.4);
+      vp.setZ(v, vp.getZ(v) + (Math.random()-0.5)*r*0.4);
+    }
     geo.computeVertexNormals();
-    const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: pal[i%pal.length], flatShading: true }));
-    m.position.set(Math.cos(angle)*dist, h/2, Math.sin(angle)*dist); scene.add(m);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: pal[Math.floor(Math.random()*pal.length)], flatShading: true }));
+    mesh.position.set(Math.cos(angle)*dist, y, Math.sin(angle)*dist);
+    mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+    scene.add(mesh);
   }
 })();
 
@@ -218,29 +240,28 @@ world.allowSleep = false;
 world.defaultContactMaterial.friction    = 0.6;
 world.defaultContactMaterial.restitution = 0.02;
 
-// Ground plane (infinite fallback)
-const groundBody = new CANNON.Body({ mass: 0 });
-groundBody.addShape(new CANNON.Plane());
-groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-world.addBody(groundBody);
-
 // ── Track building ────────────────────────────────────────────────
 const TRACK_WIDTH = 14;
-let splinePoints = [];
-const trackGroup = new THREE.Group(); scene.add(trackGroup);
-let trackBodies  = [];
+const PLAT_DEPTH  = 5;   // how far platform sides hang down
+let splinePoints  = [];
+let trackMinY     = 0;   // lowest point on track — used for fall detection
+const trackGroup  = new THREE.Group(); scene.add(trackGroup);
+let trackBodies   = [];
 
 function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
 
 function buildSpline(wpts) {
   const curve = new THREE.CatmullRomCurve3(wpts.map(v3), true, 'catmullrom', 0.5);
-  return curve.getPoints(wpts.length * 12);
+  return curve.getPoints(wpts.length * 14);
 }
 
 function addQuad([a,b,c,d], mat) {
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute([a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z,a.x,a.y,a.z,c.x,c.y,c.z,d.x,d.y,d.z],3));
-  geo.computeVertexNormals(); trackGroup.add(new THREE.Mesh(geo, mat));
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(
+    [a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z,
+     a.x,a.y,a.z, c.x,c.y,c.z, d.x,d.y,d.z], 3));
+  geo.computeVertexNormals();
+  trackGroup.add(new THREE.Mesh(geo, mat));
 }
 
 function buildTrack(wpts) {
@@ -249,70 +270,99 @@ function buildTrack(wpts) {
 
   const pts = buildSpline(wpts);
   splinePoints = pts;
+  trackMinY = Math.min(...pts.map(p => p.y));
   const n = pts.length, hw = TRACK_WIDTH / 2;
 
-  const mRoad  = new THREE.MeshLambertMaterial({ color: 0x646478, flatShading: true, side: THREE.DoubleSide });
-  const mKerbR = new THREE.MeshLambertMaterial({ color: 0xdd2222, flatShading: true });
-  const mKerbW = new THREE.MeshLambertMaterial({ color: 0xeeeeee, flatShading: true });
-  const mWall  = new THREE.MeshLambertMaterial({ color: 0x1a3a88, flatShading: true });
-  const mStart = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  // ── Materials: space platform look ────────────────────────────
+  const mRoad   = new THREE.MeshLambertMaterial({ color: 0x1c2340, flatShading: true, side: THREE.DoubleSide });
+  const mSide   = new THREE.MeshLambertMaterial({ color: 0x0d1120, flatShading: true, side: THREE.DoubleSide });
+  const mBottom = new THREE.MeshLambertMaterial({ color: 0x0a0e1a, flatShading: true, side: THREE.DoubleSide });
+  const mTrimL  = new THREE.MeshLambertMaterial({ color: 0x00cfff, flatShading: true }); // cyan left trim
+  const mTrimR  = new THREE.MeshLambertMaterial({ color: 0xff3366, flatShading: true }); // pink right trim
+  const mStart  = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
   const lefts = [], rights = [], fwds = [];
   for (let i = 0; i < n; i++) {
     const p = pts[i], pN = pts[(i+1)%n];
     const fwd   = new THREE.Vector3().subVectors(pN, p).normalize();
     const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-    lefts.push(new THREE.Vector3().copy(p).addScaledVector(right,-hw));
-    rights.push(new THREE.Vector3().copy(p).addScaledVector(right,hw));
+    lefts.push(new THREE.Vector3().copy(p).addScaledVector(right, -hw));
+    rights.push(new THREE.Vector3().copy(p).addScaledVector(right,  hw));
     fwds.push(fwd);
   }
 
-  // Road mesh (one buffer)
+  // ── Road surface (combined buffer for speed) ───────────────────
   const rv=[], ri=[];
   for (let i = 0; i < n-1; i++) {
     const b = rv.length/3;
     [lefts[i],rights[i],rights[i+1],lefts[i+1]].forEach(v=>rv.push(v.x,v.y,v.z));
-    ri.push(b,b+1,b+2,b,b+2,b+3);
+    ri.push(b,b+1,b+2, b,b+2,b+3);
   }
   const rGeo = new THREE.BufferGeometry();
-  rGeo.setAttribute('position', new THREE.Float32BufferAttribute(rv,3)); rGeo.setIndex(ri); rGeo.computeVertexNormals();
+  rGeo.setAttribute('position', new THREE.Float32BufferAttribute(rv,3));
+  rGeo.setIndex(ri); rGeo.computeVertexNormals();
   trackGroup.add(new THREE.Mesh(rGeo, mRoad));
 
-  // Kerbs + walls
-  const kw=1.4, bh=2.2;
+  // ── Platform sides + bottom + edge trim ───────────────────────
+  const TRIM = 0.5; // trim strip width
   for (let i = 0; i < n-1; i++) {
-    const L0=lefts[i],L1=lefts[i+1],R0=rights[i],R1=rights[i+1];
+    const L0=lefts[i], L1=lefts[i+1], R0=rights[i], R1=rights[i+1];
+    const LB0=new THREE.Vector3(L0.x, L0.y-PLAT_DEPTH, L0.z);
+    const LB1=new THREE.Vector3(L1.x, L1.y-PLAT_DEPTH, L1.z);
+    const RB0=new THREE.Vector3(R0.x, R0.y-PLAT_DEPTH, R0.z);
+    const RB1=new THREE.Vector3(R1.x, R1.y-PLAT_DEPTH, R1.z);
+
+    // Left side
+    addQuad([L1, L0, LB0, LB1], mSide);
+    // Right side
+    addQuad([R0, R1, RB1, RB0], mSide);
+    // Bottom
+    addQuad([LB0, RB0, RB1, LB1], mBottom);
+
+    // Coloured edge trim strips (thin, sit just above road surface)
     const rv2 = new THREE.Vector3().crossVectors(fwds[i], new THREE.Vector3(0,1,0)).normalize();
-    const km  = Math.floor(i/8)%2===0 ? mKerbR : mKerbW;
-    const lE0=L0.clone().addScaledVector(rv2,-kw), lE1=L1.clone().addScaledVector(rv2,-kw);
-    const rE0=R0.clone().addScaledVector(rv2,kw),  rE1=R1.clone().addScaledVector(rv2,kw);
-    addQuad([L0,L1,lE1,lE0],km); addQuad([R0,rE0,rE1,R1],km);
-    addQuad([lE0,lE1,lE1.clone().setY(lE1.y+bh),lE0.clone().setY(lE0.y+bh)],mWall);
-    addQuad([rE0,rE0.clone().setY(rE0.y+bh),rE1.clone().setY(rE1.y+bh),rE1],mWall);
+    const Y = 0.05;
+    const lT0 = L0.clone().addScaledVector(rv2, -TRIM).setY(L0.y+Y);
+    const lT1 = L1.clone().addScaledVector(rv2, -TRIM).setY(L1.y+Y);
+    const rT0 = R0.clone().addScaledVector(rv2,  TRIM).setY(R0.y+Y);
+    const rT1 = R1.clone().addScaledVector(rv2,  TRIM).setY(R1.y+Y);
+    const lO0 = L0.clone().setY(L0.y+Y), lO1 = L1.clone().setY(L1.y+Y);
+    const rO0 = R0.clone().setY(R0.y+Y), rO1 = R1.clone().setY(R1.y+Y);
+    addQuad([lO0, lO1, lT1, lT0], mTrimL);
+    addQuad([rT0, rT1, rO1, rO0], mTrimR);
   }
 
-  // Start/finish stripe
+  // ── Start/finish stripe ────────────────────────────────────────
   const sf=new THREE.Vector3().subVectors(pts[1],pts[0]).normalize();
   const sr=new THREE.Vector3().crossVectors(sf,new THREE.Vector3(0,1,0)).normalize();
   for (let s=-1;s<=1;s+=2) {
-    const a=pts[0].clone().addScaledVector(sr,s*hw/2).setY(pts[0].y+0.04);
-    const b=pts[0].clone().addScaledVector(sr,s*hw).setY(pts[0].y+0.04);
+    const a=pts[0].clone().addScaledVector(sr,s*hw/2).setY(pts[0].y+0.06);
+    const b=pts[0].clone().addScaledVector(sr,s*hw  ).setY(pts[0].y+0.06);
     addQuad([a,b,b.clone().addScaledVector(sf,3),a.clone().addScaledVector(sf,3)],mStart);
   }
 
-  // CANNON: one tilted box per spline segment (thick enough to prevent tunnelling)
+  // ── CANNON physics: flat boxes positioned flush under road surface
+  //    Very thick (yHalf=6) so car can never fall through.
+  //    Top face sits right at road surface (no protrusion = no bounce launches).
+  const yHalf = 6.0;
   for (let i = 0; i < n-1; i++) {
     const p0=pts[i], p1=pts[i+1];
+    const mx=(p0.x+p1.x)*0.5, my=(p0.y+p1.y)*0.5, mz=(p0.z+p1.z)*0.5;
     const dx=p1.x-p0.x, dy=p1.y-p0.y, dz=p1.z-p0.z;
     const len = Math.sqrt(dx*dx+dy*dy+dz*dz) || 0.001;
-    const dir = new THREE.Vector3(dx,dy,dz).divideScalar(len);
-    const q   = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), dir);
-    const up  = new THREE.Vector3(0,1,0).applyQuaternion(q);
-    // Centre box 0.6 units below the road surface
+    // Use a purely horizontal box — no tilt rotation.
+    // Slight slope compensation is handled by thick Y extent.
     const body = new CANNON.Body({ mass: 0 });
-    body.addShape(new CANNON.Box(new CANNON.Vec3(hw+2.5, 0.8, len*0.68)));
-    body.position.set((p0.x+p1.x)*0.5 - up.x*0.6, (p0.y+p1.y)*0.5 - up.y*0.6, (p0.z+p1.z)*0.5 - up.z*0.6);
-    body.quaternion.set(q.x,q.y,q.z,q.w);
+    body.addShape(new CANNON.Box(new CANNON.Vec3(hw+3, yHalf, (len*0.9)+0.5)));
+    // Position so the TOP FACE of the box is at the road surface (my).
+    // Centre is yHalf below the road midpoint.
+    body.position.set(mx, my - yHalf, mz);
+    // Align the Z-axis of the box to the horizontal projection of the segment
+    const hDir = new THREE.Vector3(dx, 0, dz).normalize();
+    if (hDir.lengthSq() > 0.001) {
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), hDir);
+      body.quaternion.set(q.x, q.y, q.z, q.w);
+    }
     world.addBody(body); trackBodies.push(body);
   }
 }
@@ -629,7 +679,7 @@ function startRace(idx) {
   activeTrack=idx; const track=TRACKS[idx];
   buildTrack(track.waypoints); setupCheckpoints(); setupMinimap();
   buildCar(track.carColor, track.wingColor);
-  scene.fog=settings.fog?new THREE.FogExp2(SKY,0.007):null;
+  scene.fog=settings.fog?new THREE.FogExp2(SKY,0.004):null;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
   resetCar(); hideAllScreens();
@@ -726,10 +776,9 @@ function updatePhysics(dt) {
     chassisBody.applyForce(new CANNON.Vec3(0,-downforce,0), chassisBody.position);
   }
 
-  // ── Anti-fall: respawn if car drops far below track ───────────
+  // ── Anti-fall: respawn if car drops below the lowest track point
   if (splinePoints.length && chassisBody) {
-    const trackY = splinePoints[nearestSegIdx].y;
-    if (chassisBody.position.y < trackY - 6) respawnCar();
+    if (chassisBody.position.y < trackMinY - 30) respawnCar();
   }
 
   world.step(1/60, dt, 5);  // 5 substeps — prevents tunnelling at high speed
