@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.3.5</div>
+<div id="version-tag">v1.3.6</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -540,24 +540,27 @@ function respawnCar() {
   offTrackTime = 0;
   nearestSegIdx = 0;
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), car.heading);
-  camPos.copy(car.pos).add(new THREE.Vector3(0,5,-10).applyQuaternion(q));
-  camLook.copy(car.pos).add(new THREE.Vector3(0,1,6).applyQuaternion(q));
+  camPos.copy(car.pos).add(new THREE.Vector3(0,2.2,-5.5).applyQuaternion(q));
+  camLook.copy(car.pos).add(new THREE.Vector3(0,0.4,3.5).applyQuaternion(q));
 }
 
 // ── Camera ────────────────────────────────────────────────────────
 let camPos  = new THREE.Vector3(0,40,100);
 let camLook = new THREE.Vector3();
 const CAM_CFG = {
-  chase:   { off: new THREE.Vector3(0,  4,  -9), look: new THREE.Vector3(0, 0.8,  6) },
-  high:    { off: new THREE.Vector3(0, 16, -20), look: new THREE.Vector3(0, 0.0, 12) },
-  cockpit: { off: new THREE.Vector3(0,  1.8, 0.6), look: new THREE.Vector3(0, 1.8, 12) },
+  chase:   { off: new THREE.Vector3(0,  2.2, -5.5), look: new THREE.Vector3(0, 0.4, 3.5) },
+  high:    { off: new THREE.Vector3(0, 12,  -16),   look: new THREE.Vector3(0, 0.0, 8)   },
+  cockpit: { off: new THREE.Vector3(0,  1.2,  0.4), look: new THREE.Vector3(0, 1.2, 10)  },
 };
 function updateCamera(dt) {
   const q   = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, carState.heading, 0));
   const cfg = CAM_CFG[settings.camera];
   const ic  = settings.camera === 'cockpit';
-  camPos.lerp(carState.pos.clone().add(cfg.off.clone().applyQuaternion(q)),  ic?0.95:(1-Math.pow(0.006,dt)));
-  camLook.lerp(carState.pos.clone().add(cfg.look.clone().applyQuaternion(q)),ic?0.85:(1-Math.pow(0.003,dt)));
+  // Use a fixed lerp speed so the camera never falls behind at high speed
+  const posLerp  = ic ? 0.95 : Math.min(1, dt * 14);
+  const lookLerp = ic ? 0.85 : Math.min(1, dt * 18);
+  camPos.lerp(carState.pos.clone().add(cfg.off.clone().applyQuaternion(q)),  posLerp);
+  camLook.lerp(carState.pos.clone().add(cfg.look.clone().applyQuaternion(q)), lookLerp);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
 }
@@ -634,8 +637,8 @@ function resetCar() {
   nearestSegIdx = 0; lastSegment = 0; cpPassed.fill(false);
   showCar(true);
   const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), car.heading);
-  camPos.copy(car.pos).add(new THREE.Vector3(0,5,-10).applyQuaternion(q));
-  camLook.copy(car.pos).add(new THREE.Vector3(0,1,6).applyQuaternion(q));
+  camPos.copy(car.pos).add(new THREE.Vector3(0,2.2,-5.5).applyQuaternion(q));
+  camLook.copy(car.pos).add(new THREE.Vector3(0,0.4,3.5).applyQuaternion(q));
 }
 
 function startRace(idx) {
