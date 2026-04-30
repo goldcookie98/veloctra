@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.1.0</div>
+<div id="version-tag">v1.2.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -144,28 +144,31 @@ const TRACKS = [
   {
     name: 'Pulsar Station', desc: 'Technical flow through\nfloating space platforms', tag: 'TECHNICAL',
     carColor: 0x00d2be, wingColor: 0x111111,
+    // XZ scaled ×2.5 from original — much larger track
     waypoints: [
-      [  0, 0,  0],[30, 0,-10],[60, 0,-12],[84, 2, -2],[94, 5, 20],
-      [ 86, 8, 44],[64,10, 60],[34,10, 64],[  4, 8, 56],[-16, 5, 38],
-      [-20, 2, 16],[-10, 0, -2],
+      [   0, 0,   0],[ 75, 0, -25],[150, 0, -30],[210, 2,  -5],[235, 6,  50],
+      [ 215,10, 110],[160,13, 150],[ 85,13, 160],[  10,10, 140],[-40, 6,  95],
+      [ -50, 2,  40],[-25, 0,  -5],
     ]
   },
   {
     name: 'Celestia Ring', desc: 'High-speed orbit around\na collapsed star', tag: 'HIGH SPEED',
     carColor: 0xe8002d, wingColor: 0xffff00,
+    // XZ scaled ×2.5 — long sweeping oval
     waypoints: [
-      [  0, 0,  0],[38, 0,  8],[70, 1, 20],[90, 3, 42],[94, 5, 68],
-      [ 80, 6, 94],[55, 7,108],[24, 6,106],[ -4, 4, 92],[-18, 2, 68],
-      [-18, 1, 40],[ -4, 0, 18],
+      [   0, 0,   0],[ 95, 0,  20],[175, 1,  50],[225, 4, 105],[235, 6, 170],
+      [ 200, 8, 235],[138, 9, 270],[ 60, 8, 265],[ -10, 5, 230],[-45, 3, 170],
+      [ -45, 1, 100],[-10, 0,  45],
     ]
   },
   {
     name: 'Dark Matter', desc: 'Twisty switchbacks\nthrough the void', tag: 'ENDURANCE',
     carColor: 0x9b59b6, wingColor: 0xe056fd,
+    // XZ scaled ×2.5 — tight technical layout with proper elevation
     waypoints: [
-      [  0, 0,  0],[22, 1, 22],[38, 4, 32],[44, 8, 22],[34,11,  4],
-      [ 12,12,-14],[ -8,10,-24],[-14, 7,-16],[ -8, 4,  0],[  4, 2, 12],
-      [ 12, 0,  8],
+      [   0, 0,   0],[ 55, 1,  55],[ 95, 5,  80],[110,10,  55],[ 85,14,  10],
+      [  30,15, -35],[-20,13, -60],[-35, 9, -40],[-20, 5,   0],[  10, 3,  30],
+      [  30, 0,  20],
     ]
   }
 ];
@@ -177,7 +180,7 @@ const SKY = 0x00010f;
 renderer.setClearColor(SKY);
 const scene  = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
-const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1200);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 3000);
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -415,12 +418,12 @@ const RAY_DOWN    = new THREE.Vector3(0, -1, 0);
 const RAY_ABOVE   = 14;   // cast from this many units above car.pos.y
 const RAY_REACH   = 20;   // how far down the ray looks from origin
 
-const MAX_SPEED   = 60;
-const ACCEL_RATE  = 28;
-const BRAKE_RATE  = 52;
-const REV_SPEED   = 12;
-const STEER_MAX   = 0.52;
-const WHEELBASE   = 3.2;
+const MAX_SPEED   = 55;   // m/s — top speed unchanged, but takes longer to reach
+const ACCEL_RATE  = 13;   // was 28 — slow, progressive acceleration like a real car
+const BRAKE_RATE  = 34;   // was 52 — firm but not instant braking
+const REV_SPEED   = 10;
+const STEER_MAX   = 0.36; // was 0.52 — much less twitchy maximum steer angle
+const WHEELBASE   = 5.5;  // was 3.2 — longer = slower, smoother turning radius
 
 // Returns { y, normal, hit } by raycasting against roadMesh
 function castToRoad() {
@@ -634,7 +637,7 @@ function startRace(idx) {
   activeTrack=idx; const track=TRACKS[idx];
   buildTrack(track.waypoints); setupCheckpoints(); setupMinimap();
   buildCar(track.carColor, track.wingColor);
-  scene.fog=settings.fog?new THREE.FogExp2(SKY,0.004):null;
+  scene.fog=settings.fog?new THREE.FogExp2(SKY,0.0018):null;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
   resetCar(); hideAllScreens();
@@ -710,8 +713,9 @@ function updateCar(dt) {
 
   // ── Steering ─────────────────────────────────────────────────
   const steerIn  = (inputLeft()?1:0) - (inputRight()?1:0);
-  const steerLim = STEER_MAX * Math.max(0.2, 1 - absSpd / MAX_SPEED * 0.75);
-  car.steer = THREE.MathUtils.lerp(car.steer, steerIn * steerLim, steerIn !== 0 ? 0.15 : 0.22);
+  const steerLim = STEER_MAX * Math.max(0.25, 1 - absSpd / MAX_SPEED * 0.70);
+  // Slow lerp = gradual turn-in (no snapping). Release is quicker so the car straightens naturally.
+  car.steer = THREE.MathUtils.lerp(car.steer, steerIn * steerLim, steerIn !== 0 ? 0.08 : 0.14);
   car.heading += (car.speed / WHEELBASE) * car.steer * dt;
 
   // ── Move XZ ──────────────────────────────────────────────────
