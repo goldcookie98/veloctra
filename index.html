@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.5</div>
+<div id="version-tag">v1.4.6</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -194,16 +194,31 @@ renderer.setClearColor(SKY);
 const scene  = new THREE.Scene();
 scene.background = new THREE.Color(SKY);
 
-// Generate a minimal environment map so PBR metallic materials show colour.
-// Must run AFTER scene is created. Without this, metallic surfaces appear black.
+// Build a proper blue-sky environment map so metallic PBR materials reflect colour.
+// 32×16 equirectangular gradient: bright blue sky above, dark ground below.
 (function buildEnvMap() {
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
-  const px = new Float32Array([
-    2.4, 3.0, 4.0, 1,  2.4, 3.0, 4.0, 1,
-    0.04,0.04,0.08,1,  0.04,0.04,0.08,1,
-  ]);
-  const tex = new THREE.DataTexture(px, 2, 2, THREE.RGBAFormat, THREE.FloatType);
+  const W = 32, H = 16;
+  const data = new Float32Array(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    const t = y / (H - 1); // 0 = top of image = zenith, 1 = bottom = nadir
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (t < 0.55) {
+        // Sky: deep blue at zenith, lighter blue-white at horizon
+        const f = t / 0.55;
+        data[i]   = 0.05 + f * 0.55;   // R
+        data[i+1] = 0.15 + f * 0.55;   // G
+        data[i+2] = 0.80 + f * 0.45;   // B  (bright blue sky)
+        data[i+3] = 1;
+      } else {
+        // Ground: very dark
+        data[i] = 0.04; data[i+1] = 0.05; data[i+2] = 0.06; data[i+3] = 1;
+      }
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.needsUpdate = true;
   scene.environment = pmrem.fromEquirectangular(tex).texture;
@@ -408,28 +423,7 @@ function buildTrack(wpts) {
   trackGroup.add(rm);
   roadMesh = rm;   // ← raycaster target
 
-  // ── Platform sides + bottom + edge trim ───────────────────────
-  const TRIM = 0.5;
-  for (let i = 0; i < n-1; i++) {
-    const L0=lefts[i], L1=lefts[i+1], R0=rights[i], R1=rights[i+1];
-    const LB0=new THREE.Vector3(L0.x,L0.y-PLAT_DEPTH,L0.z);
-    const LB1=new THREE.Vector3(L1.x,L1.y-PLAT_DEPTH,L1.z);
-    const RB0=new THREE.Vector3(R0.x,R0.y-PLAT_DEPTH,R0.z);
-    const RB1=new THREE.Vector3(R1.x,R1.y-PLAT_DEPTH,R1.z);
-    addQuad([L1, L0, LB0, LB1], mSide);
-    addQuad([R0, R1, RB1, RB0], mSide);
-    addQuad([LB0, RB0, RB1, LB1], mBottom);
-    const rv2 = new THREE.Vector3().crossVectors(fwds[i], new THREE.Vector3(0,1,0)).normalize();
-    const Y = 0.05;
-    const lT0=L0.clone().addScaledVector(rv2,-TRIM).setY(L0.y+Y);
-    const lT1=L1.clone().addScaledVector(rv2,-TRIM).setY(L1.y+Y);
-    const rT0=R0.clone().addScaledVector(rv2, TRIM).setY(R0.y+Y);
-    const rT1=R1.clone().addScaledVector(rv2, TRIM).setY(R1.y+Y);
-    const lO0=L0.clone().setY(L0.y+Y), lO1=L1.clone().setY(L1.y+Y);
-    const rO0=R0.clone().setY(R0.y+Y), rO1=R1.clone().setY(R1.y+Y);
-    addQuad([lO0, lO1, lT1, lT0], mTrimL);
-    addQuad([rT0, rT1, rO1, rO0], mTrimR);
-  }
+  // Platform sides/bottom/trim removed — road.glb tiles are the visual road surface.
 
   // ── Barriers / railings along both edges ─────────────────────
   const BARRIER_H = 0.9;
@@ -496,19 +490,17 @@ let carModelReady = false;
     // Model already faces +Z — no rotation needed
 
     carRoot.add(model);
-    // Fix PBR materials: zero metalness so textures render with diffuse colour only.
+    // Let the GLB's own PBR materials render — the env map above gives them something
+    // to reflect. Only clamp extreme metalness to prevent pure-mirror black in flat light.
     model.traverse(child => {
       if (!child.isMesh) return;
       const mats = Array.isArray(child.material) ? child.material : [child.material];
       mats.forEach(m => {
         if (!m) return;
         if (m.isMeshStandardMaterial || m.isMeshPhysicalMaterial) {
-          m.metalness        = 0.0;
-          m.roughness        = 0.55;
-          m.envMapIntensity  = 0.0;
-          m.emissive         = new THREE.Color(0, 0, 0);
-          m.emissiveIntensity = 0;
-          m.needsUpdate      = true;
+          m.metalness = Math.min(m.metalness, 0.6);
+          m.envMapIntensity = 1.0;
+          m.needsUpdate = true;
         }
       });
     });
@@ -632,22 +624,26 @@ function resolveWall() {
   const nxt = splinePoints[(nearestSegIdx+1)%n];
   const fwd   = new THREE.Vector3().subVectors(nxt, cen).normalize();
   const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-  const lat   = new THREE.Vector3(car.pos.x-cen.x, 0, car.pos.z-cen.z).dot(right);
-  const lim   = TRACK_WIDTH / 2 - 0.4;
+  const offset = new THREE.Vector3(car.pos.x - cen.x, 0, car.pos.z - cen.z);
+  const lat    = offset.dot(right);
+  const lim    = TRACK_WIDTH / 2 - 0.3;
+
   if (Math.abs(lat) > lim) {
-    // Push car back inside the barrier
+    // 1. Move car exactly to the wall surface (no overshoot)
     const excess = Math.abs(lat) - lim;
-    car.pos.x -= right.x * Math.sign(lat) * excess * 1.8;
-    car.pos.z -= right.z * Math.sign(lat) * excess * 1.8;
-    // Bounce: reflect heading off the wall normal (inward-facing)
+    car.pos.x -= right.x * Math.sign(lat) * excess;
+    car.pos.z -= right.z * Math.sign(lat) * excess;
+
+    // 2. Reflect velocity off the wall normal — proper physics bounce
     const wallNormal = right.clone().multiplyScalar(-Math.sign(lat));
-    const vel = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
+    const vel = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading))
+                    .multiplyScalar(car.speed);
     const dot = vel.dot(wallNormal);
     if (dot < 0) {
-      // Reflect with restitution 0.55 — real bounce, not sticky glue
-      vel.addScaledVector(wallNormal, -2 * dot * 0.55);
+      // Reflect: v' = v - 2(v·n)n  with restitution 0.65
+      vel.addScaledVector(wallNormal, -2 * dot * 0.65);
+      car.speed   = vel.length() * 0.85; // 15% energy lost on impact
       car.heading = Math.atan2(vel.x, vel.z);
-      car.speed *= 0.78; // lose ~22% speed on impact
     }
   }
 }
