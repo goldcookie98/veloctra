@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.6.0</div>
+<div id="version-tag">v1.6.1</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -193,7 +193,7 @@
 <div id="name-entry">
   <div class="ne-title">Race Finished</div>
   <div class="ne-best" id="ne-best-time">0:00.000</div>
-  <div class="ne-sub">Best Lap</div>
+  <div class="ne-sub">Total Time</div>
   <input id="ne-input" type="text" maxlength="8" placeholder="NAME" autocomplete="off" spellcheck="false" />
   <div class="ne-hint">Up to 8 characters &mdash; press Enter to save</div>
   <button class="btn primary" id="ne-submit">Save &amp; Continue</button>
@@ -1035,7 +1035,7 @@ function startRace(idx) {
   });
 }
 // ── Leaderboard storage ───────────────────────────────────────────
-const LB_KEY = 'veloctra_lb_v1';
+const LB_KEY = 'veloctra_lb_v2';
 const LB_MAX = 10; // entries per track
 
 function lbLoad() {
@@ -1082,12 +1082,12 @@ function buildLeaderboardScreen() {
 }
 
 // ── Name entry flow ───────────────────────────────────────────────
-let pendingFinishTrack = 0, pendingBestLap = 0;
+let pendingFinishTrack = 0, pendingTotalTime = 0;
 
-function showNameEntry(trackIdx, best, resultsHTML) {
+function showNameEntry(trackIdx, total, resultsHTML) {
   pendingFinishTrack = trackIdx;
-  pendingBestLap = best;
-  document.getElementById('ne-best-time').textContent = fmtTime(best);
+  pendingTotalTime = total;
+  document.getElementById('ne-best-time').textContent = fmtTime(total);
   document.getElementById('ne-input').value = '';
   document.getElementById('name-entry').classList.add('active');
   // pre-fill results box now (leaderboard will be added after name saved)
@@ -1099,10 +1099,10 @@ function showNameEntry(trackIdx, best, resultsHTML) {
 
 function finishNameEntry(name) {
   document.getElementById('name-entry').classList.remove('active');
-  const rank = name ? lbSave(pendingFinishTrack, name, pendingBestLap) : -1;
+  if (name) lbSave(pendingFinishTrack, name, pendingTotalTime);
   // Update leaderboard in finish screen with highlight
   const tbl = document.getElementById('finish-lb-table');
-  if (tbl) tbl.innerHTML = lbBuildTable(pendingFinishTrack, name ? pendingBestLap : null);
+  if (tbl) tbl.innerHTML = lbBuildTable(pendingFinishTrack, name ? pendingTotalTime : null);
   showScreen('screen-finish');
 }
 
@@ -1124,7 +1124,7 @@ function endRace() {
     `<div class="result-row" style="margin-top:12px;border-top:1px solid rgba(100,180,255,0.15);padding-top:12px"><span>Best Lap</span><span>${fmtTime(bestLap)}</span></div>
      <div class="result-row"><span>Total</span><span>${fmtTime(total)}</span></div>`;
   document.getElementById('hud').style.display='none';
-  showNameEntry(activeTrack, bestLap, resultsHTML);
+  showNameEntry(activeTrack, total, resultsHTML);
 }
 function returnToMenu() {
   racing=false; gameOver=false; showCar(false);
