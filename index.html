@@ -30,9 +30,9 @@
     #btn-back-menu { bottom: 72px; left: 20px; }
     #btn-reset-car:hover { background: rgba(255,80,80,0.25); border-color: rgba(255,100,100,0.6); color: #fff; }
     #btn-back-menu:hover { background: rgba(0,150,255,0.25); border-color: rgba(0,200,255,0.6); color: #fff; }
-    #drift-indicator { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-      color: #ff8800; font-size: 13px; font-weight: 900; letter-spacing: 4px;
-      text-shadow: 0 0 12px rgba(255,120,0,0.9); display: none; pointer-events: none; }
+    #drift-indicator { position: absolute; bottom: 114px; left: 20px;
+      color: rgba(255,255,255,0.35); font-size: 11px; font-weight: 700; letter-spacing: 3px;
+      pointer-events: none; text-transform: uppercase; }
 
     #minimap { position: absolute; bottom: 20px; right: 20px; width: 140px; height: 140px; background: rgba(10,20,40,0.65); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; overflow: hidden; }
     #minimap canvas { width: 100%; height: 100%; }
@@ -95,14 +95,14 @@
   </div>
   <button id="btn-reset-car">R &mdash; Reset</button>
   <button id="btn-back-menu">ESC &mdash; Menu</button>
-  <div id="drift-indicator">DRIFT</div>
+  <div id="drift-indicator">SHIFT &mdash; DRIFT</div>
   <div id="minimap"><canvas id="mm-canvas" width="140" height="140"></canvas></div>
 </div>
 
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.5.1</div>
+<div id="version-tag">v1.5.2</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -528,6 +528,7 @@ function buildDecorations(theme, pts, lefts, rights, group) {
 
 // ── Track geometry builder ────────────────────────────────────────
 function buildTrack(wpts, theme='space') {
+  clearSkidmarks();
   while (trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
   roadMesh = null;
 
@@ -755,44 +756,68 @@ function fmtTime(ms) {
 }
 
 // ── Wall bounce ───────────────────────────────────────────────────
-let wallHitCooldown = 0;
+// Core fix: project the car onto the SEGMENT LINE (not just use the endpoint),
+// so lateral distance is accurate even deep inside a curve.
 function resolveWall() {
   if (!splinePoints.length) return;
-  if (wallHitCooldown > 0) { wallHitCooldown--; return; }
-  const n = splinePoints.length;
-  const lim = TRACK_WIDTH / 2 - 0.3;
+  const n    = splinePoints.length;
+  const halfW = TRACK_WIDTH / 2 - 0.3;
+  const cx = car.pos.x, cz = car.pos.z;
 
-  // Check a window of segments to find the tightest wall constraint
-  let maxExcess = 0, hitRight = null, hitSign = 0;
-  for (let d = -3; d <= 3; d++) {
-    const idx = ((nearestSegIdx + d) % n + n) % n;
-    const cen = splinePoints[idx];
-    const nxt = splinePoints[(idx+1)%n];
-    const fwd   = new THREE.Vector3().subVectors(nxt, cen).normalize();
-    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-    const lat   = new THREE.Vector3(car.pos.x-cen.x, 0, car.pos.z-cen.z).dot(right);
-    const excess = Math.abs(lat) - lim;
-    if (excess > maxExcess) { maxExcess = excess; hitRight = right; hitSign = Math.sign(lat); }
+  let bestExcess = 0, wallNx = 0, wallNz = 0;
+
+  for (let d = -5; d <= 5; d++) {
+    const i  = ((nearestSegIdx + d) % n + n) % n;
+    const ax = splinePoints[i].x,         az = splinePoints[i].z;
+    const bx = splinePoints[(i+1)%n].x,   bz = splinePoints[(i+1)%n].z;
+    const abx = bx-ax, abz = bz-az;
+    const len2 = abx*abx + abz*abz;
+    if (len2 < 0.01) continue;
+
+    // t = parameter of closest point on segment AB
+    const t  = Math.max(0, Math.min(1, ((cx-ax)*abx + (cz-az)*abz) / len2));
+    // Closest point on segment (projected centre)
+    const px = ax + abx*t, pz = az + abz*t;
+
+    // Right vector: crossVectors(fwd, up) in XZ = (-fz, 0, fx)
+    const fLen = Math.sqrt(len2);
+    const fx = abx/fLen, fz = abz/fLen;
+    const rx = -fz, rz = fx; // right direction
+
+    // Lateral distance from projected centre
+    const lat    = (cx-px)*rx + (cz-pz)*rz;
+    const excess = Math.abs(lat) - halfW;
+
+    if (excess > bestExcess) {
+      bestExcess = excess;
+      // Wall normal = inward direction (opposite to the wall side the car is on)
+      const sign = Math.sign(lat);
+      wallNx = -rx * sign;
+      wallNz = -rz * sign;
+    }
   }
 
-  if (maxExcess > 0 && hitRight) {
-    // Push car exactly back to wall surface
-    car.pos.x -= hitRight.x * hitSign * maxExcess;
-    car.pos.z -= hitRight.z * hitSign * maxExcess;
+  if (bestExcess > 0) {
+    // Snap car to wall surface — exact, no overshoot
+    car.pos.x += wallNx * bestExcess;
+    car.pos.z += wallNz * bestExcess;
 
-    // Reflect the full velocity vector (includes drift slip)
-    const wallNormal = hitRight.clone().multiplyScalar(-hitSign);
-    const slipAngle  = Math.atan2(car.slip, 1);
-    const velDir     = car.heading + slipAngle;
-    const vel = new THREE.Vector3(Math.sin(velDir), 0, Math.cos(velDir)).multiplyScalar(Math.abs(car.speed));
-    const dot = vel.dot(wallNormal);
-    if (dot < 0) {
-      vel.addScaledVector(wallNormal, -2 * dot * 0.7);  // restitution 0.7
-      car.speed   = vel.length() * 0.80;
-      car.heading = Math.atan2(vel.x, vel.z);
-      car.slip    = 0; // kill drift on wall hit
+    // Reflect velocity (heading + slip) off wall normal
+    const slipAngle = Math.atan2(car.slip, 1);
+    const velH = car.heading + slipAngle;
+    const vx = Math.sin(velH) * car.speed;
+    const vz = Math.cos(velH) * car.speed;
+    // Dot of velocity with wall normal (negative = moving into wall)
+    const vdotN = vx*wallNx + vz*wallNz;
+    if (vdotN < 0) {
+      // Reflection with restitution 0.55 (bounce retains 55% of perpendicular component)
+      const e = 0.55;
+      const nvx = vx - (1+e) * vdotN * wallNx;
+      const nvz = vz - (1+e) * vdotN * wallNz;
+      car.speed   = Math.sqrt(nvx*nvx + nvz*nvz) * 0.88; // 12% energy loss
+      car.heading = Math.atan2(nvx, nvz);
+      car.slip    = 0; // kill drift on impact
     }
-    wallHitCooldown = 8; // skip 8 frames after bounce — no double-hit
   }
 }
 
@@ -1043,8 +1068,19 @@ function updateCar(dt) {
   car.pos.x += Math.sin(velH) * car.speed * dt;
   car.pos.z += Math.cos(velH) * car.speed * dt;
 
-  // Show/hide drift indicator
-  document.getElementById('drift-indicator').style.display = car.drifting && absSpd > 10 ? 'block' : 'none';
+  // Drift indicator + skidmarks
+  const driftEl = document.getElementById('drift-indicator');
+  if (car.drifting && absSpd > 10) {
+    driftEl.textContent = 'DRIFTING';
+    driftEl.style.color = '#ff8800';
+    driftEl.style.textShadow = '0 0 12px rgba(255,120,0,0.9)';
+    addSkidMark(car.pos.clone(), car.heading);
+  } else {
+    driftEl.textContent = 'SHIFT — DRIFT';
+    driftEl.style.color = 'rgba(255,255,255,0.35)';
+    driftEl.style.textShadow = 'none';
+    lastSkidPos = null;
+  }
 
   // ── Raycast straight down — snap Y to road surface ───────────
   //    This makes it PHYSICALLY IMPOSSIBLE to fall through the floor.
@@ -1091,6 +1127,67 @@ function updateCar(dt) {
   camera.updateProjectionMatrix();
 }
 
+// ── Skidmarks ─────────────────────────────────────────────────────
+let skidmarks = [];        // { mesh, mat, age }
+let lastSkidPos = null;
+const MAX_SKIDS = 300;
+const SKID_FADE_START = 6, SKID_FADE_END = 14;
+
+function addSkidMark(pos, heading) {
+  if (lastSkidPos && pos.distanceTo(lastSkidPos) < 0.6) return;
+  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
+  const right   = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+  const hw = 0.18, wheelSpan = 1.6;
+  const prevPos = lastSkidPos || pos;
+
+  for (const side of [-1, 1]) {
+    const p0 = prevPos.clone().addScaledVector(right, side*wheelSpan);
+    const p1 = pos.clone().addScaledVector(right, side*wheelSpan);
+    const seg = p1.clone().sub(p0); const segLen = seg.length();
+    if (segLen < 0.01) continue;
+    const perp = new THREE.Vector3().crossVectors(seg.clone().normalize(), new THREE.Vector3(0,1,0)).multiplyScalar(hw);
+    const y = pos.y + 0.05;
+    const verts = new Float32Array([
+      p0.x-perp.x, y, p0.z-perp.z,
+      p0.x+perp.x, y, p0.z+perp.z,
+      p1.x+perp.x, y, p1.z+perp.z,
+      p1.x-perp.x, y, p1.z-perp.z,
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex([0,1,2, 0,2,3]);
+    const mat = new THREE.MeshBasicMaterial({ color:0x100C06, transparent:true, opacity:0.7, depthWrite:false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 2;
+    scene.add(mesh);
+    skidmarks.push({ mesh, mat, age:0 });
+  }
+  // Trim oldest if too many
+  while (skidmarks.length > MAX_SKIDS) {
+    const old = skidmarks.shift();
+    scene.remove(old.mesh); old.mesh.geometry.dispose(); old.mat.dispose();
+  }
+  lastSkidPos = pos.clone();
+}
+
+function clearSkidmarks() {
+  skidmarks.forEach(s => { scene.remove(s.mesh); s.mesh.geometry.dispose(); s.mat.dispose(); });
+  skidmarks = []; lastSkidPos = null;
+}
+
+function updateSkidmarks(dt) {
+  for (let i = skidmarks.length-1; i >= 0; i--) {
+    const s = skidmarks[i];
+    s.age += dt;
+    if (s.age > SKID_FADE_END) {
+      scene.remove(s.mesh); s.mesh.geometry.dispose(); s.mat.dispose();
+      skidmarks.splice(i, 1);
+    } else if (s.age > SKID_FADE_START) {
+      s.mat.opacity = 0.7 * (1 - (s.age-SKID_FADE_START)/(SKID_FADE_END-SKID_FADE_START));
+    }
+  }
+}
+
 // ── Render loop ───────────────────────────────────────────────────
 let lastTime = performance.now();
 function loop() {
@@ -1103,6 +1200,7 @@ function loop() {
     updateCamera(dt);
     updateHUD();
     drawMinimap();
+    updateSkidmarks(dt);
   }
   renderer.render(scene, camera);
 }
