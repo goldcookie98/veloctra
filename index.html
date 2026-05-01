@@ -18,15 +18,21 @@
     .hud-value { font-size: 22px; font-weight: bold; color: #fff; }
     .hud-value.accent { color: #4df; }
 
-    #btn-reset-car {
-      position: absolute; bottom: 30px; left: 20px;
+    #btn-reset-car, #btn-back-menu {
+      position: absolute;
       pointer-events: all;
       background: rgba(10,20,40,0.65); border: 1px solid rgba(255,255,255,0.25);
       border-radius: 8px; padding: 8px 16px; color: rgba(255,255,255,0.7);
       font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 2px;
       cursor: pointer; text-transform: uppercase; transition: all 0.15s;
     }
+    #btn-reset-car { bottom: 30px; left: 20px; }
+    #btn-back-menu { bottom: 72px; left: 20px; }
     #btn-reset-car:hover { background: rgba(255,80,80,0.25); border-color: rgba(255,100,100,0.6); color: #fff; }
+    #btn-back-menu:hover { background: rgba(0,150,255,0.25); border-color: rgba(0,200,255,0.6); color: #fff; }
+    #drift-indicator { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+      color: #ff8800; font-size: 13px; font-weight: 900; letter-spacing: 4px;
+      text-shadow: 0 0 12px rgba(255,120,0,0.9); display: none; pointer-events: none; }
 
     #minimap { position: absolute; bottom: 20px; right: 20px; width: 140px; height: 140px; background: rgba(10,20,40,0.65); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; overflow: hidden; }
     #minimap canvas { width: 100%; height: 100%; }
@@ -88,13 +94,15 @@
     <div class="hud-value" id="hud-spd">0 <small style="font-size:12px;color:rgba(255,255,255,0.45)">km/h</small></div>
   </div>
   <button id="btn-reset-car">R &mdash; Reset</button>
+  <button id="btn-back-menu">ESC &mdash; Menu</button>
+  <div id="drift-indicator">DRIFT</div>
   <div id="minimap"><canvas id="mm-canvas" width="140" height="140"></canvas></div>
 </div>
 
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.5.0</div>
+<div id="version-tag">v1.5.1</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -648,7 +656,7 @@ function showCar(visible) {
 //  4. Lerp surface normal from hit.face.normal     → align pitch to slope
 //  5. Auto-respawn after 2.5 s if ray never hits   → no stuck states
 //
-const car = { pos: new THREE.Vector3(), heading: 0, speed: 0, steer: 0 };
+const car = { pos: new THREE.Vector3(), heading: 0, speed: 0, steer: 0, slip: 0, drifting: false };
 const surfNormal   = new THREE.Vector3(0, 1, 0);  // smoothed surface normal
 let   offTrackTime = 0;
 
@@ -690,13 +698,16 @@ const keys = {};
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
-  if (e.code === 'KeyR' && (racing || gameOver)) respawnCar();
+  if (e.code === 'KeyR'     && (racing || gameOver)) respawnCar();
+  if (e.code === 'Escape'   && (racing || gameOver)) returnToMenu();
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 const inputAccel = () => keys['KeyW'] || keys['ArrowUp'];
 const inputBrake = () => keys['KeyS'] || keys['ArrowDown'];
 const inputLeft  = () => keys['KeyA'] || keys['ArrowLeft'];
 const inputRight = () => keys['KeyD'] || keys['ArrowRight'];
+const inputDrift = () => keys['ShiftLeft'] || keys['ShiftRight'] || keys['Space'];
+document.getElementById('btn-back-menu').addEventListener('click', () => { if (racing||gameOver) returnToMenu(); });
 
 // ── carState (shared by camera / HUD / lap timing) ─────────────────
 const carState = { pos: new THREE.Vector3(), heading: 0, speed: 0 };
@@ -744,34 +755,44 @@ function fmtTime(ms) {
 }
 
 // ── Wall bounce ───────────────────────────────────────────────────
+let wallHitCooldown = 0;
 function resolveWall() {
   if (!splinePoints.length) return;
-  const n   = splinePoints.length;
-  const cen = splinePoints[nearestSegIdx];
-  const nxt = splinePoints[(nearestSegIdx+1)%n];
-  const fwd   = new THREE.Vector3().subVectors(nxt, cen).normalize();
-  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-  const offset = new THREE.Vector3(car.pos.x - cen.x, 0, car.pos.z - cen.z);
-  const lat    = offset.dot(right);
-  const lim    = TRACK_WIDTH / 2 - 0.3;
+  if (wallHitCooldown > 0) { wallHitCooldown--; return; }
+  const n = splinePoints.length;
+  const lim = TRACK_WIDTH / 2 - 0.3;
 
-  if (Math.abs(lat) > lim) {
-    // 1. Move car exactly to the wall surface (no overshoot)
+  // Check a window of segments to find the tightest wall constraint
+  let maxExcess = 0, hitRight = null, hitSign = 0;
+  for (let d = -3; d <= 3; d++) {
+    const idx = ((nearestSegIdx + d) % n + n) % n;
+    const cen = splinePoints[idx];
+    const nxt = splinePoints[(idx+1)%n];
+    const fwd   = new THREE.Vector3().subVectors(nxt, cen).normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
+    const lat   = new THREE.Vector3(car.pos.x-cen.x, 0, car.pos.z-cen.z).dot(right);
     const excess = Math.abs(lat) - lim;
-    car.pos.x -= right.x * Math.sign(lat) * excess;
-    car.pos.z -= right.z * Math.sign(lat) * excess;
+    if (excess > maxExcess) { maxExcess = excess; hitRight = right; hitSign = Math.sign(lat); }
+  }
 
-    // 2. Reflect velocity off the wall normal — proper physics bounce
-    const wallNormal = right.clone().multiplyScalar(-Math.sign(lat));
-    const vel = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading))
-                    .multiplyScalar(car.speed);
+  if (maxExcess > 0 && hitRight) {
+    // Push car exactly back to wall surface
+    car.pos.x -= hitRight.x * hitSign * maxExcess;
+    car.pos.z -= hitRight.z * hitSign * maxExcess;
+
+    // Reflect the full velocity vector (includes drift slip)
+    const wallNormal = hitRight.clone().multiplyScalar(-hitSign);
+    const slipAngle  = Math.atan2(car.slip, 1);
+    const velDir     = car.heading + slipAngle;
+    const vel = new THREE.Vector3(Math.sin(velDir), 0, Math.cos(velDir)).multiplyScalar(Math.abs(car.speed));
     const dot = vel.dot(wallNormal);
     if (dot < 0) {
-      // Reflect: v' = v - 2(v·n)n  with restitution 0.65
-      vel.addScaledVector(wallNormal, -2 * dot * 0.65);
-      car.speed   = vel.length() * 0.85; // 15% energy lost on impact
+      vel.addScaledVector(wallNormal, -2 * dot * 0.7);  // restitution 0.7
+      car.speed   = vel.length() * 0.80;
       car.heading = Math.atan2(vel.x, vel.z);
+      car.slip    = 0; // kill drift on wall hit
     }
+    wallHitCooldown = 8; // skip 8 frames after bounce — no double-hit
   }
 }
 
@@ -783,7 +804,7 @@ function respawnCar() {
   const dir = new THREE.Vector3().subVectors(ptN, pt).normalize();
   car.heading = Math.atan2(dir.x, dir.z);
   car.pos.set(pt.x, pt.y + CAR_HEIGHT, pt.z);
-  car.speed = 0; car.steer = 0;
+  car.speed = 0; car.steer = 0; car.slip = 0; car.drifting = false;
   surfNormal.set(0, 1, 0);
   offTrackTime = 0;
   nearestSegIdx = 0;
@@ -795,6 +816,7 @@ function respawnCar() {
 // ── Camera ────────────────────────────────────────────────────────
 let camPos  = new THREE.Vector3(0,40,100);
 let camLook = new THREE.Vector3();
+let camSwing = 0; // smoothed lateral swing amount (-1 to 1)
 const CAM_CFG = {
   chase:   { off: new THREE.Vector3(0,  4.2, -6.5), look: new THREE.Vector3(0, 1.0, 4.5) },
   high:    { off: new THREE.Vector3(0, 12,  -16),   look: new THREE.Vector3(0, 0.0, 8)   },
@@ -804,14 +826,24 @@ function updateCamera(dt) {
   const q   = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, carState.heading, 0));
   const cfg = CAM_CFG[settings.camera];
   const ic  = settings.camera === 'cockpit';
-  // Use a fixed lerp speed so the camera never falls behind at high speed
-  // Cockpit gets slight smoothing; chase/high snap directly so camera never lags
-  const targetPos  = carState.pos.clone().add(cfg.off.clone().applyQuaternion(q));
-  const targetLook = carState.pos.clone().add(cfg.look.clone().applyQuaternion(q));
+
+  // Lateral camera swing: follows steer (and exaggerated during drift)
+  const swingTarget = (car.steer / STEER_MAX) * (car.drifting ? 1.5 : 1.0);
+  camSwing = THREE.MathUtils.lerp(camSwing, swingTarget, 0.04 * dt * 60);
+
+  // Chase offset shifts sideways to reveal the car's side during cornering
+  const latShift = camSwing * (ic ? 0.8 : 5.0);
+  const offV  = cfg.off.clone();  offV.x  += latShift;
+  const lookV = cfg.look.clone(); lookV.x += latShift * 1.6;
+
+  const targetPos  = carState.pos.clone().add(offV.clone().applyQuaternion(q));
+  const targetLook = carState.pos.clone().add(lookV.clone().applyQuaternion(q));
+
   if (ic) {
     camPos.lerp(targetPos,  0.92);
     camLook.lerp(targetLook, 0.88);
   } else {
+    // Snap to position (no lag) but let the lateral swing lerp smoothly
     camPos.copy(targetPos);
     camLook.copy(targetLook);
   }
@@ -885,7 +917,7 @@ function resetCar() {
   const dir = new THREE.Vector3().subVectors(p1, p0).normalize();
   car.heading = Math.atan2(dir.x, dir.z);
   car.pos.set(p0.x, p0.y + CAR_HEIGHT, p0.z);
-  car.speed = 0; car.steer = 0;
+  car.speed = 0; car.steer = 0; car.slip = 0; car.drifting = false;
   surfNormal.set(0, 1, 0);
   offTrackTime = 0;
   nearestSegIdx = 0; lastSegment = 0; cpPassed.fill(false);
@@ -983,13 +1015,36 @@ function updateCar(dt) {
   // ── Steering ─────────────────────────────────────────────────
   const steerIn  = (inputLeft()?1:0) - (inputRight()?1:0);
   const steerLim = STEER_MAX * Math.max(0.25, 1 - absSpd / MAX_SPEED * 0.70);
-  // Slow lerp = gradual turn-in (no snapping). Release is quicker so the car straightens naturally.
   car.steer = THREE.MathUtils.lerp(car.steer, steerIn * steerLim, steerIn !== 0 ? 0.08 : 0.14);
-  car.heading += (car.speed / WHEELBASE) * car.steer * dt;
 
-  // ── Move XZ ──────────────────────────────────────────────────
-  car.pos.x += Math.sin(car.heading) * car.speed * dt;
-  car.pos.z += Math.cos(car.heading) * car.speed * dt;
+  // ── Drift ─────────────────────────────────────────────────────
+  // Drift = hold Shift/Space while steering at speed.
+  // `car.slip` is the lateral slip ratio — positive = sliding right, negative = left.
+  // The car body faces `heading` but moves in `heading + slipAngle`.
+  if (inputDrift() && absSpd > 10 && Math.abs(steerIn) > 0.05) {
+    car.drifting = true;
+    // Target slip proportional to steer input
+    const targetSlip = -steerIn * 0.55;
+    car.slip = THREE.MathUtils.lerp(car.slip, targetSlip, 0.04 * dt * 60);
+    // Heading over-rotates relative to velocity when drifting
+    car.heading += (car.speed / WHEELBASE) * car.steer * 1.7 * dt;
+    // Small friction penalty
+    car.speed *= Math.pow(0.997, dt * 60);
+  } else {
+    car.drifting = false;
+    // Slip bleeds off naturally
+    car.slip = THREE.MathUtils.lerp(car.slip, 0, 0.10 * dt * 60);
+    car.heading += (car.speed / WHEELBASE) * car.steer * dt;
+  }
+
+  // ── Move XZ — velocity uses heading + slip angle ──────────────
+  const slipAngle = Math.atan2(car.slip, 1); // convert ratio → angle
+  const velH = car.heading + slipAngle;
+  car.pos.x += Math.sin(velH) * car.speed * dt;
+  car.pos.z += Math.cos(velH) * car.speed * dt;
+
+  // Show/hide drift indicator
+  document.getElementById('drift-indicator').style.display = car.drifting && absSpd > 10 ? 'block' : 'none';
 
   // ── Raycast straight down — snap Y to road surface ───────────
   //    This makes it PHYSICALLY IMPOSSIBLE to fall through the floor.
@@ -1013,16 +1068,13 @@ function updateCar(dt) {
   if (racing) { resolveWall(); checkLapTriggers(); }
 
   // ── Orient car body ───────────────────────────────────────────
-  //    Use surface normal to compute real pitch; add heading & lean.
-  //    setFromUnitVectors aligns car Y-up to surface normal, then we
-  //    add a heading rotation on top so it faces the right direction.
   const upDefault = new THREE.Vector3(0, 1, 0);
-  // Align car's up axis to the surface normal
   const tiltQ = new THREE.Quaternion().setFromUnitVectors(upDefault, surfNormal);
-  // Heading rotation around the surface normal
+  // Body faces heading (not velocity direction) — that's what makes drifting visible
   const headQ = new THREE.Quaternion().setFromAxisAngle(surfNormal, car.heading);
-  // Lean into corners
-  const leanAmount = car.steer * 0.065 * Math.min(absSpd / 14, 1);
+  // Body lean into corners (amplified during drift)
+  const leanMul    = car.drifting ? 2.2 : 1.0;
+  const leanAmount = car.steer * 0.065 * Math.min(absSpd / 14, 1) * leanMul;
   const carFwdH    = new THREE.Vector3(Math.sin(car.heading), 0, Math.cos(car.heading));
   const leanQ      = new THREE.Quaternion().setFromAxisAngle(carFwdH, -leanAmount);
 
