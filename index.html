@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.6.3</div>
+<div id="version-tag">v1.6.4</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -876,27 +876,21 @@ function resolveWall() {
   car.pos.x = cpx + rx * side * halfW;
   car.pos.z = cpz + rz * side * halfW;
 
-  // 5. Scrape: cancel only the into-wall component of velocity, keep the
-  //    along-wall component. No reflection — car slides along the barrier.
-  const wallNx = -rx * side; // inward normal
+  // 5. Impact: kill speed based on how directly the car hit the wall.
+  //    Never change car.heading — that's what caused the sudden-turn feel.
+  //    Grazing the wall loses almost no speed; hitting it head-on kills it.
+  const wallNx = -rx * side;
   const wallNz = -rz * side;
   const slipAngle = Math.atan2(car.slip, 1);
   const velH = car.heading + slipAngle;
   const vx = Math.sin(velH) * car.speed;
   const vz = Math.cos(velH) * car.speed;
-  const vdotN = vx*wallNx + vz*wallNz; // < 0 means moving into wall
+  const vdotN = vx*wallNx + vz*wallNz; // negative = moving into wall
   if (vdotN < 0) {
-    // Strip the wall-penetrating component, keep the sliding component
-    const nvx = vx - vdotN * wallNx;
-    const nvz = vz - vdotN * wallNz;
-    const newSpeed = Math.sqrt(nvx*nvx + nvz*nvz);
-    if (newSpeed > 0.5) {
-      car.heading = Math.atan2(nvx, nvz);
-      car.speed   = newSpeed * 0.82; // scrape friction
-    } else {
-      car.speed *= 0.5;
-    }
-    car.slip = 0;
+    // How head-on is the impact? 0 = grazing, 1 = perpendicular
+    const impact = Math.abs(vdotN) / (car.speed + 0.001);
+    car.speed *= Math.max(0, 1 - impact * 0.85);
+    car.slip   = 0;
   }
 }
 
