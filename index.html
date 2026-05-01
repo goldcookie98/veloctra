@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.7.1</div>
+<div id="version-tag">v1.7.2</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -204,13 +204,18 @@
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
-    "three/examples/jsm/loaders/GLTFLoader.js": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js"
+    "three/examples/jsm/loaders/GLTFLoader.js": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/loaders/GLTFLoader.js",
+    "firebase/app":       "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js"
   }
 }
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { initializeApp }                                         from 'firebase/app';
+import { getFirestore, collection, addDoc, query, where,
+         orderBy, limit, getDocs }                               from 'firebase/firestore';
 
 // ── Settings ──────────────────────────────────────────────────────
 const settings = { fog: true, camera: 'chase', laps: 3 };
@@ -1036,57 +1041,33 @@ function startRace(idx) {
     document.getElementById('hud').style.display='block';
   });
 }
-// ── Online leaderboard — Firebase Firestore ──────────────────────
-// Setup (free, ~2 minutes):
-//  1. Go to https://console.firebase.google.com → Add project (free Spark plan)
-//  2. Click "Firestore Database" → Create database → Start in TEST MODE
-//  3. Go to Project Settings (gear icon) → General → Your apps → </> Web
-//     Register the app, then copy the apiKey and projectId values
-//  4. Paste them below — the API key is safe to include in client code
-const FB_PROJECT = ''; // e.g. 'veloctra-abc12'
-const FB_API_KEY  = ''; // your Web API key from Firebase project settings
-const fbOK = () => FB_PROJECT !== '' && FB_API_KEY !== '';
-const FB_BASE = () =>
-  `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents`;
+// ── Firebase Firestore leaderboard ───────────────────────────────
+const fbApp = initializeApp({
+  apiKey:            'AIzaSyBCqRTWt49PCzmq9iEmSZcL_j71f--Y5pM',
+  authDomain:        'veloctra.firebaseapp.com',
+  projectId:         'veloctra',
+  storageBucket:     'veloctra.firebasestorage.app',
+  messagingSenderId: '768084428903',
+  appId:             '1:768084428903:web:69df53ad5c77fd1cac2cc2',
+});
+const db    = getFirestore(fbApp);
+const fbOK  = () => true;
 
 async function onlineSave(trackIdx, name, timeMs) {
-  if (!fbOK()) return false;
   try {
-    const r = await fetch(`${FB_BASE()}/leaderboard?key=${FB_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: {
-        trackIdx:   { integerValue: String(trackIdx) },
-        playerName: { stringValue:  name            },
-        timeMs:     { integerValue: String(timeMs)  },
-      }}),
-    });
-    return r.ok;
+    await addDoc(collection(db, 'leaderboard'), { trackIdx, playerName: name, timeMs });
+    return true;
   } catch { return false; }
 }
 
-async function onlineFetch(trackIdx, limit = 10) {
-  if (!fbOK()) return null;
+async function onlineFetch(trackIdx, lim = 10) {
   try {
-    const r = await fetch(`${FB_BASE()}:runQuery?key=${FB_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ structuredQuery: {
-        from:    [{ collectionId: 'leaderboard' }],
-        where:   { fieldFilter: { field: { fieldPath: 'trackIdx' }, op: 'EQUAL',
-                   value: { integerValue: String(trackIdx) } } },
-        orderBy: [{ field: { fieldPath: 'timeMs' }, direction: 'ASCENDING' }],
-        limit,
-      }}),
-    });
-    if (!r.ok) return null;
-    const docs = await r.json();
-    return docs
-      .filter(d => d.document?.fields)
-      .map(d => ({
-        player_name: d.document.fields.playerName.stringValue,
-        time_ms:     parseInt(d.document.fields.timeMs.integerValue, 10),
-      }));
+    const q    = query(collection(db, 'leaderboard'),
+                       where('trackIdx', '==', trackIdx),
+                       orderBy('timeMs', 'asc'),
+                       limit(lim));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ player_name: d.data().playerName, time_ms: d.data().timeMs }));
   } catch { return null; }
 }
 
