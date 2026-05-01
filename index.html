@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.6.1</div>
+<div id="version-tag">v1.6.2</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -598,7 +598,18 @@ function buildTrack(wpts, theme='space') {
 
   const roadCols = { pirate:0xB89248, space:0x1A1A2A, medieval:0x555566 };
   const mRoad  = new THREE.MeshLambertMaterial({color:roadCols[theme]||0x1A1A2A, flatShading:true, side:THREE.DoubleSide});
-  const mStart = new THREE.MeshLambertMaterial({color:0xffffff});
+  // Checkered finish-line texture (canvas)
+  const flCanvas = document.createElement('canvas');
+  flCanvas.width = 512; flCanvas.height = 128;
+  const flCtx = flCanvas.getContext('2d');
+  const cols = 16, rows = 4;
+  const cw = flCanvas.width/cols, ch = flCanvas.height/rows;
+  for (let r=0; r<rows; r++) for (let c=0; c<cols; c++) {
+    flCtx.fillStyle = (r+c)%2===0 ? '#ffffff' : '#111111';
+    flCtx.fillRect(c*cw, r*ch, cw, ch);
+  }
+  const flTex = new THREE.CanvasTexture(flCanvas);
+  const mStart = new THREE.MeshBasicMaterial({ map: flTex, depthWrite: true });
 
   const lefts=[], rights=[], fwds=[];
   for (let i=0;i<n;i++) {
@@ -643,13 +654,17 @@ function buildTrack(wpts, theme='space') {
   const mkB=(v,i,m)=>{if(!i.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(i);g.computeVertexNormals();trackGroup.add(new THREE.Mesh(g,m));};
   mkB(blA,biA,mBA);mkB(blB,biB,mBB);mkB(brA,briA,mBA);mkB(brB,briB,mBB);
 
-  // Start/finish stripe
-  const sf=new THREE.Vector3().subVectors(pts[1],pts[0]).normalize();
-  const sr=new THREE.Vector3().crossVectors(sf,new THREE.Vector3(0,1,0)).normalize();
-  for(let s=-1;s<=1;s+=2){
-    const a=pts[0].clone().addScaledVector(sr,s*hw/2).setY(pts[0].y+0.08);
-    const b=pts[0].clone().addScaledVector(sr,s*hw  ).setY(pts[0].y+0.08);
-    addQuad([a,b,b.clone().addScaledVector(sf,3),a.clone().addScaledVector(sf,3)],mStart);
+  // Checkered start/finish line — full track width, 4 units deep
+  {
+    const sf = new THREE.Vector3().subVectors(pts[1], pts[0]).normalize();
+    const sr = new THREE.Vector3().crossVectors(sf, new THREE.Vector3(0,1,0)).normalize();
+    const y  = pts[0].y + 0.09;
+    const p0 = pts[0].clone().addScaledVector(sr, -hw).addScaledVector(sf, -0.5);
+    const p1 = pts[0].clone().addScaledVector(sr,  hw).addScaledVector(sf, -0.5);
+    const p2 = pts[0].clone().addScaledVector(sr,  hw).addScaledVector(sf,  3.5);
+    const p3 = pts[0].clone().addScaledVector(sr, -hw).addScaledVector(sf,  3.5);
+    p0.y = p1.y = p2.y = p3.y = y;
+    addQuad([p0, p1, p2, p3], mStart);
   }
 
   // Themed world decorations
@@ -816,68 +831,67 @@ function fmtTime(ms) {
 }
 
 // ── Wall bounce ───────────────────────────────────────────────────
-// Core fix: project the car onto the SEGMENT LINE (not just use the endpoint),
-// so lateral distance is accurate even deep inside a curve.
+// Approach: find the single closest point on the whole spline (search ±20 segs),
+// compute lateral offset from that point, then SET the car position absolutely
+// to the wall surface — never add an offset that can compound or overshoot.
 function resolveWall() {
   if (!splinePoints.length) return;
-  const n    = splinePoints.length;
-  const halfW = TRACK_WIDTH / 2 - 0.3;
-  const cx = car.pos.x, cz = car.pos.z;
+  const n     = splinePoints.length;
+  const halfW = TRACK_WIDTH / 2 - 0.4;
 
-  let bestExcess = 0, wallNx = 0, wallNz = 0;
-
-  for (let d = -5; d <= 5; d++) {
+  // 1. Find the closest projected point on the spline
+  let bestDist2 = Infinity, bestSeg = nearestSegIdx, bestT = 0;
+  for (let d = -20; d <= 20; d++) {
     const i  = ((nearestSegIdx + d) % n + n) % n;
-    const ax = splinePoints[i].x,         az = splinePoints[i].z;
-    const bx = splinePoints[(i+1)%n].x,   bz = splinePoints[(i+1)%n].z;
-    const abx = bx-ax, abz = bz-az;
-    const len2 = abx*abx + abz*abz;
-    if (len2 < 0.01) continue;
-
-    // t = parameter of closest point on segment AB
-    const t  = Math.max(0, Math.min(1, ((cx-ax)*abx + (cz-az)*abz) / len2));
-    // Closest point on segment (projected centre)
-    const px = ax + abx*t, pz = az + abz*t;
-
-    // Right vector: crossVectors(fwd, up) in XZ = (-fz, 0, fx)
-    const fLen = Math.sqrt(len2);
-    const fx = abx/fLen, fz = abz/fLen;
-    const rx = -fz, rz = fx; // right direction
-
-    // Lateral distance from projected centre
-    const lat    = (cx-px)*rx + (cz-pz)*rz;
-    const excess = Math.abs(lat) - halfW;
-
-    if (excess > bestExcess) {
-      bestExcess = excess;
-      // Wall normal = inward direction (opposite to the wall side the car is on)
-      const sign = Math.sign(lat);
-      wallNx = -rx * sign;
-      wallNz = -rz * sign;
-    }
+    const j  = (i + 1) % n;
+    const ax = splinePoints[i].x, az = splinePoints[i].z;
+    const bx = splinePoints[j].x, bz = splinePoints[j].z;
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx*dx + dz*dz;
+    if (len2 < 0.001) continue;
+    const t  = Math.max(0, Math.min(1, ((car.pos.x-ax)*dx + (car.pos.z-az)*dz) / len2));
+    const px = ax + dx*t, pz = az + dz*t;
+    const d2 = (car.pos.x-px)*(car.pos.x-px) + (car.pos.z-pz)*(car.pos.z-pz);
+    if (d2 < bestDist2) { bestDist2 = d2; bestSeg = i; bestT = t; }
   }
 
-  if (bestExcess > 0) {
-    // Snap car to wall surface — exact, no overshoot
-    car.pos.x += wallNx * bestExcess;
-    car.pos.z += wallNz * bestExcess;
+  // 2. Derive track-local axes at that point
+  const si = bestSeg, sj = (si + 1) % n;
+  const ax = splinePoints[si].x, az = splinePoints[si].z;
+  const bx = splinePoints[sj].x, bz = splinePoints[sj].z;
+  const dx = bx - ax, dz = bz - az;
+  const fLen = Math.sqrt(dx*dx + dz*dz);
+  if (fLen < 0.001) return;
+  const fx = dx/fLen, fz = dz/fLen;   // forward
+  const rx = -fz,     rz =  fx;       // right (perpendicular)
+  const cpx = ax + dx*bestT, cpz = az + dz*bestT; // closest centre point
 
-    // Reflect velocity (heading + slip) off wall normal
-    const slipAngle = Math.atan2(car.slip, 1);
-    const velH = car.heading + slipAngle;
-    const vx = Math.sin(velH) * car.speed;
-    const vz = Math.cos(velH) * car.speed;
-    // Dot of velocity with wall normal (negative = moving into wall)
-    const vdotN = vx*wallNx + vz*wallNz;
-    if (vdotN < 0) {
-      // Reflection with restitution 0.55 (bounce retains 55% of perpendicular component)
-      const e = 0.55;
-      const nvx = vx - (1+e) * vdotN * wallNx;
-      const nvz = vz - (1+e) * vdotN * wallNz;
-      car.speed   = Math.sqrt(nvx*nvx + nvz*nvz) * 0.88; // 12% energy loss
-      car.heading = Math.atan2(nvx, nvz);
-      car.slip    = 0; // kill drift on impact
-    }
+  // 3. Lateral distance (signed)
+  const lat    = (car.pos.x - cpx)*rx + (car.pos.z - cpz)*rz;
+  const excess = Math.abs(lat) - halfW;
+  if (excess <= 0) return; // inside track — nothing to do
+
+  // 4. SET position to wall surface (absolute, no cumulative offset)
+  const side = Math.sign(lat);
+  car.pos.x = cpx + rx * side * halfW;
+  car.pos.z = cpz + rz * side * halfW;
+
+  // 5. Reflect only if actually moving into the wall
+  const wallNx = -rx * side; // inward normal
+  const wallNz = -rz * side;
+  const slipAngle = Math.atan2(car.slip, 1);
+  const velH = car.heading + slipAngle;
+  const vx = Math.sin(velH) * car.speed;
+  const vz = Math.cos(velH) * car.speed;
+  const vdotN = vx*wallNx + vz*wallNz;
+  if (vdotN < 0) {
+    // Reflect with restitution — perpendicular component flips, tangential kept
+    const e    = 0.38;
+    const nvx  = vx - (1 + e) * vdotN * wallNx;
+    const nvz  = vz - (1 + e) * vdotN * wallNz;
+    car.speed   = Math.sqrt(nvx*nvx + nvz*nvz) * 0.70;
+    car.heading = Math.atan2(nvx, nvz);
+    car.slip    = 0;
   }
 }
 
@@ -901,10 +915,9 @@ function respawnCar() {
 // ── Camera ────────────────────────────────────────────────────────
 let camPos  = new THREE.Vector3(0,40,100);
 let camLook = new THREE.Vector3();
-let camSwing = 0; // smoothed lateral swing amount (-1 to 1)
 const CAM_CFG = {
-  chase:   { off: new THREE.Vector3(0,  4.2, -6.5), look: new THREE.Vector3(0, 1.0, 4.5) },
-  high:    { off: new THREE.Vector3(0, 12,  -16),   look: new THREE.Vector3(0, 0.0, 8)   },
+  chase:   { off: new THREE.Vector3(0,  4.5, -7.5), look: new THREE.Vector3(0, 1.0, 5.0) },
+  high:    { off: new THREE.Vector3(0, 13,   -18),  look: new THREE.Vector3(0, 0.0, 8)   },
   cockpit: { off: new THREE.Vector3(0,  1.2,  0.4), look: new THREE.Vector3(0, 1.2, 10)  },
 };
 function updateCamera(dt) {
@@ -912,23 +925,13 @@ function updateCamera(dt) {
   const cfg = CAM_CFG[settings.camera];
   const ic  = settings.camera === 'cockpit';
 
-  // Lateral camera swing: follows steer (and exaggerated during drift)
-  const swingTarget = (car.steer / STEER_MAX) * (car.drifting ? 1.5 : 1.0);
-  camSwing = THREE.MathUtils.lerp(camSwing, swingTarget, 0.04 * dt * 60);
-
-  // Chase offset shifts sideways to reveal the car's side during cornering
-  const latShift = camSwing * (ic ? 0.8 : 5.0);
-  const offV  = cfg.off.clone();  offV.x  += latShift;
-  const lookV = cfg.look.clone(); lookV.x += latShift * 1.6;
-
-  const targetPos  = carState.pos.clone().add(offV.clone().applyQuaternion(q));
-  const targetLook = carState.pos.clone().add(lookV.clone().applyQuaternion(q));
+  const targetPos  = carState.pos.clone().add(cfg.off.clone().applyQuaternion(q));
+  const targetLook = carState.pos.clone().add(cfg.look.clone().applyQuaternion(q));
 
   if (ic) {
     camPos.lerp(targetPos,  0.92);
     camLook.lerp(targetLook, 0.88);
   } else {
-    // Snap to position (no lag) but let the lateral swing lerp smoothly
     camPos.copy(targetPos);
     camLook.copy(targetLook);
   }
