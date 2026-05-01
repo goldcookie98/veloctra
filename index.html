@@ -216,6 +216,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { initializeApp }                                         from 'firebase/app';
 import { getFirestore, collection, addDoc, query, where,
          orderBy, limit, getDocs }                               from 'firebase/firestore';
+import { firebaseConfig }                                        from './firebase-config.js';
 
 // ── Settings ──────────────────────────────────────────────────────
 const settings = { fog: true, camera: 'chase', laps: 3 };
@@ -1157,14 +1158,7 @@ function startRace(idx) {
   });
 }
 // ── Firebase Firestore leaderboard ───────────────────────────────
-const fbApp = initializeApp({
-  apiKey:            'AIzaSyBCqRTWt49PCzmq9iEmSZcL_j71f--Y5pM',
-  authDomain:        'veloctra.firebaseapp.com',
-  projectId:         'veloctra',
-  storageBucket:     'veloctra.firebasestorage.app',
-  messagingSenderId: '768084428903',
-  appId:             '1:768084428903:web:69df53ad5c77fd1cac2cc2',
-});
+const fbApp = initializeApp(firebaseConfig);
 const db    = getFirestore(fbApp);
 const fbOK  = () => true;
 
