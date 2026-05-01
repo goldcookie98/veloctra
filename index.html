@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.6.4</div>
+<div id="version-tag">v1.7.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -1036,51 +1036,113 @@ function startRace(idx) {
     document.getElementById('hud').style.display='block';
   });
 }
-// ── Leaderboard storage ───────────────────────────────────────────
-const LB_KEY = 'veloctra_lb_v2';
-const LB_MAX = 10; // entries per track
+// ── Online leaderboard — Supabase ────────────────────────────────
+// To enable global leaderboards:
+//  1. Create a free project at https://supabase.com
+//  2. In the SQL editor run:
+//       create table leaderboard (
+//         id bigserial primary key,
+//         track_idx int not null,
+//         player_name text not null,
+//         time_ms bigint not null,
+//         created_at timestamptz default now()
+//       );
+//       alter table leaderboard enable row level security;
+//       create policy "read"   on leaderboard for select using (true);
+//       create policy "insert" on leaderboard for insert with check (true);
+//  3. Paste your Project URL and anon key below:
+const SB_URL = ''; // e.g. 'https://xyzxyz.supabase.co'
+const SB_KEY = ''; // your anon / public key
+const sbOK   = () => SB_URL !== '' && SB_KEY !== '';
 
-function lbLoad() {
-  try { return JSON.parse(localStorage.getItem(LB_KEY)) || {}; } catch(e) { return {}; }
+const sbHeaders = () => ({
+  'Content-Type':  'application/json',
+  'apikey':        SB_KEY,
+  'Authorization': `Bearer ${SB_KEY}`,
+});
+
+async function onlineSave(trackIdx, name, timeMs) {
+  if (!sbOK()) return false;
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/leaderboard`, {
+      method: 'POST',
+      headers: { ...sbHeaders(), 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ track_idx: trackIdx, player_name: name, time_ms: timeMs }),
+    });
+    return r.ok;
+  } catch { return false; }
 }
-function lbSave(trackIdx, name, timeMs) {
+
+async function onlineFetch(trackIdx, limit = 10) {
+  if (!sbOK()) return null;
+  try {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/leaderboard?track_idx=eq.${trackIdx}&order=time_ms.asc&limit=${limit}&select=player_name,time_ms`,
+      { headers: sbHeaders() }
+    );
+    if (!r.ok) return null;
+    return await r.json(); // [{player_name, time_ms}, ...]
+  } catch { return null; }
+}
+
+// ── Local leaderboard (fallback / offline cache) ──────────────────
+const LB_KEY = 'veloctra_lb_v2';
+const LB_MAX = 10;
+function lbLoad() { try { return JSON.parse(localStorage.getItem(LB_KEY)) || {}; } catch { return {}; } }
+function lbLocalSave(trackIdx, name, timeMs) {
   const db = lbLoad();
   if (!db[trackIdx]) db[trackIdx] = [];
-  db[trackIdx].push({ name: name.toUpperCase().slice(0,8).trim() || 'ANON', time: timeMs });
+  db[trackIdx].push({ name, time: timeMs });
   db[trackIdx].sort((a,b) => a.time - b.time);
   if (db[trackIdx].length > LB_MAX) db[trackIdx].length = LB_MAX;
   localStorage.setItem(LB_KEY, JSON.stringify(db));
-  return db[trackIdx].findIndex(e => e.time === timeMs && e.name === (name.toUpperCase().slice(0,8).trim() || 'ANON'));
 }
-function lbGet(trackIdx) {
-  const db = lbLoad();
-  return db[trackIdx] || [];
-}
-function lbBuildTable(trackIdx, highlightTime) {
-  const entries = lbGet(trackIdx);
+function lbLocalGet(trackIdx) { return (lbLoad()[trackIdx] || []); }
+
+// Render a <tbody> HTML string from an array of {name,time} or {player_name,time_ms}
+function lbRows(entries, highlightTime) {
   if (!entries.length) return '<tr><td colspan="3" class="lb-empty">No records yet</td></tr>';
-  return entries.map((e,i) => {
-    const isYou = highlightTime !== null && Math.abs(e.time - highlightTime) < 1;
-    return `<tr class="${isYou ? 'lb-you' : ''}">
+  return entries.map((e, i) => {
+    const nm  = e.player_name || e.name || '???';
+    const ms  = e.time_ms     ?? e.time ?? 0;
+    const you = highlightTime !== null && Math.abs(ms - highlightTime) < 2;
+    return `<tr class="${you ? 'lb-you' : ''}">
       <td class="lb-pos">${['🥇','🥈','🥉'][i] || `${i+1}.`}</td>
-      <td class="lb-name">${e.name}</td>
-      <td class="lb-time">${fmtTime(e.time)}</td>
-    </tr>`;
+      <td class="lb-name">${nm}</td>
+      <td class="lb-time">${fmtTime(ms)}</td></tr>`;
   }).join('');
 }
-function buildLeaderboardScreen() {
+
+async function buildLeaderboardScreen() {
   const container = document.getElementById('lb-all-tracks');
   container.innerHTML = '';
-  TRACKS.forEach((t, i) => {
-    const entries = lbGet(i);
+  // Online status badge
+  const badge = document.createElement('div');
+  badge.style.cssText = 'font-size:10px;letter-spacing:2px;color:rgba(255,255,255,0.3);margin-bottom:20px;text-align:center;';
+  badge.textContent = sbOK() ? '🌐  GLOBAL LEADERBOARD' : '💾  LOCAL ONLY — see code comments to enable global';
+  container.appendChild(badge);
+
+  for (let i = 0; i < TRACKS.length; i++) {
+    const t = TRACKS[i];
     const block = document.createElement('div');
     block.className = 'lb-track-block';
     block.innerHTML = `
       <div class="lb-track-name">${t.name}</div>
       <div class="lb-track-tag">${t.tag}</div>
-      <table class="lb-table"><tbody>${lbBuildTable(i, null)}</tbody></table>`;
+      <table class="lb-table"><tbody id="lb-body-${i}">
+        <tr><td class="lb-empty" colspan="3">Loading…</td></tr>
+      </tbody></table>`;
     container.appendChild(block);
-  });
+  }
+  showScreen('screen-leaderboard');
+
+  // Fetch each track (online first, fall back to local)
+  for (let i = 0; i < TRACKS.length; i++) {
+    const online = await onlineFetch(i);
+    const entries = online || lbLocalGet(i).map(e => ({ player_name: e.name, time_ms: e.time }));
+    const tbody = document.getElementById(`lb-body-${i}`);
+    if (tbody) tbody.innerHTML = lbRows(entries, null);
+  }
 }
 
 // ── Name entry flow ───────────────────────────────────────────────
@@ -1088,24 +1150,34 @@ let pendingFinishTrack = 0, pendingTotalTime = 0;
 
 function showNameEntry(trackIdx, total, resultsHTML) {
   pendingFinishTrack = trackIdx;
-  pendingTotalTime = total;
+  pendingTotalTime   = total;
   document.getElementById('ne-best-time').textContent = fmtTime(total);
   document.getElementById('ne-input').value = '';
   document.getElementById('name-entry').classList.add('active');
-  // pre-fill results box now (leaderboard will be added after name saved)
   document.getElementById('results-box').innerHTML = resultsHTML +
-    `<div class="lb-section"><div class="lb-section-title">Track Best Times</div>
-     <table class="lb-table" id="finish-lb-table"><tbody>${lbBuildTable(trackIdx, null)}</tbody></table></div>`;
+    `<div class="lb-section"><div class="lb-section-title">${sbOK() ? '🌐 Global' : '💾 Local'} Best Times</div>
+     <table class="lb-table" id="finish-lb-table"><tbody>
+       <tr><td class="lb-empty" colspan="3">—</td></tr>
+     </tbody></table></div>`;
   setTimeout(() => document.getElementById('ne-input').focus(), 50);
 }
 
-function finishNameEntry(name) {
+async function finishNameEntry(name) {
   document.getElementById('name-entry').classList.remove('active');
-  if (name) lbSave(pendingFinishTrack, name, pendingTotalTime);
-  // Update leaderboard in finish screen with highlight
-  const tbl = document.getElementById('finish-lb-table');
-  if (tbl) tbl.innerHTML = lbBuildTable(pendingFinishTrack, name ? pendingTotalTime : null);
+  const cleanName = name ? name.toUpperCase().slice(0,8).trim() || 'ANON' : '';
+  if (cleanName) {
+    lbLocalSave(pendingFinishTrack, cleanName, pendingTotalTime);
+    onlineSave(pendingFinishTrack, cleanName, pendingTotalTime); // fire-and-forget
+  }
   showScreen('screen-finish');
+
+  // Populate leaderboard asynchronously
+  const tbl = document.getElementById('finish-lb-table');
+  if (!tbl) return;
+  tbl.innerHTML = '<tr><td class="lb-empty" colspan="3">Loading…</td></tr>';
+  const online  = await onlineFetch(pendingFinishTrack);
+  const entries = online || lbLocalGet(pendingFinishTrack).map(e => ({ player_name: e.name, time_ms: e.time }));
+  tbl.innerHTML = lbRows(entries, cleanName ? pendingTotalTime : null);
 }
 
 document.getElementById('ne-submit').addEventListener('click', () => {
@@ -1114,7 +1186,6 @@ document.getElementById('ne-submit').addEventListener('click', () => {
 document.getElementById('ne-skip').addEventListener('click', () => finishNameEntry(''));
 document.getElementById('ne-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') finishNameEntry(document.getElementById('ne-input').value);
-  // Block non-alphanumeric (allow backspace/delete)
   if (!/^[a-zA-Z0-9]$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
 });
 
@@ -1162,7 +1233,7 @@ document.getElementById('btn-settings-back').addEventListener('click',()=>showSc
 document.getElementById('btn-tracks-back').addEventListener('click',()=>showScreen('screen-menu'));
 document.getElementById('btn-restart').addEventListener('click',()=>{hideAllScreens();startRace(activeTrack);});
 document.getElementById('btn-menu').addEventListener('click',returnToMenu);
-document.getElementById('btn-leaderboard-open').addEventListener('click',()=>{buildLeaderboardScreen();showScreen('screen-leaderboard');});
+document.getElementById('btn-leaderboard-open').addEventListener('click',()=>{ buildLeaderboardScreen(); });
 document.getElementById('btn-lb-back').addEventListener('click',()=>showScreen('screen-menu'));
 document.getElementById('btn-reset-car').addEventListener('click',()=>{ if(racing||gameOver) respawnCar(); });
 
