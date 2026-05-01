@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.7.2</div>
+<div id="version-tag">v1.8.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -253,6 +253,35 @@ const TRACKS = [
       [  0,0,  0],[ 55,0, 65],[ 80,3,135],[ 50,5,200],
       [-20,6,235],[-85,5,215],[-115,3,165],[-110,1, 95],
       [-65,0, 45],[-20,0, 10]
+    ]
+  },
+  {
+    name: 'Neon Strip',
+    desc: 'One shot through the megacity — no second chances',
+    tag: 'ENDURANCE',
+    theme: 'city',
+    forceLaps: 1,
+    waypoints: [
+      [   0,  0,   0],
+      [ 180,  0,  -5],
+      [ 360,  0,   5],
+      [ 470,  0,  90],
+      [ 515,  2, 210],
+      [ 490,  5, 330],
+      [ 420,  7, 430],
+      [ 310,  9, 510],
+      [ 170, 10, 555],
+      [  20, 10, 565],
+      [-130, 10, 545],
+      [-260,  8, 495],
+      [-370,  6, 415],
+      [-420,  4, 310],
+      [-430,  3, 200],
+      [-400,  2, 100],
+      [-320,  1,  30],
+      [-210,  0, -10],
+      [-100,  0, -20],
+      [ -20,  0,  -8]
     ]
   }
 ];
@@ -585,9 +614,93 @@ function addMarketStall(p, g) {
   gr.position.copy(p); gr.rotation.y=Math.random()*Math.PI*.5; g.add(gr);
 }
 
+// ── NEON CITY — Neon Strip ───────────────────────────────────────
+function buildNeonCityDecor(pts, lefts, rights, g) {
+  // Ground — near-black asphalt stretching to horizon
+  const gnd = new THREE.Mesh(new THREE.PlaneGeometry(4000,4000), _lm(0x06060E));
+  gnd.rotation.x = -Math.PI/2; gnd.position.y = -0.5; g.add(gnd);
+
+  // Neon accent colours
+  const neons = [0x00FFEE, 0xFF00BB, 0xFFEE00, 0x00FFAA, 0xFF4488, 0x44AAFF];
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+  // Skyscrapers — grid around the track, spaced 70 units
+  // Track roughly spans X: -450..520, Z: -25..575 — build beyond those bounds
+  for (let gx = -650; gx <= 750; gx += 70) {
+    for (let gz = -200; gz <= 750; gz += 70) {
+      // Skip cells that are too close to any spline point
+      let close = false;
+      for (let k = 0; k < pts.length; k += 8) {
+        const dx = pts[k].x - gx, dz = pts[k].z - gz;
+        if (dx*dx + dz*dz < 1600) { close = true; break; } // 40 unit clearance
+      }
+      if (close) continue;
+
+      const h  = 18 + (Math.abs(gx * gz) % 80);
+      const wx = 10 + (Math.abs(gx + gz) % 22);
+      const wz = 10 + (Math.abs(gx - gz) % 22);
+
+      // Building body
+      const body = new THREE.Mesh(new THREE.BoxGeometry(wx, h, wz), _lm(0x080818));
+      body.position.set(gx, h * 0.5, gz);
+      g.add(body);
+
+      // Neon roof glow strip
+      const nc = neons[(Math.abs(gx ^ gz)) % neons.length];
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(wx + 0.6, 0.6, wz + 0.6), _em(nc));
+      roof.position.set(gx, h + 0.3, gz);
+      g.add(roof);
+
+      // Occasional vertical neon stripe on façade
+      if ((gx + gz) % 5 === 0) {
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, h * 0.6, 0.5), _em(nc));
+        stripe.position.set(gx + wx * 0.5 + 0.2, h * 0.35, gz);
+        g.add(stripe);
+      }
+    }
+  }
+
+  // Neon street lights every 20 spline points on alternating sides
+  decorEvery(pts, lefts, rights, 20, 4, g, (pos, side, right, gr) => {
+    const nc = pick(neons);
+    // Pole
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 7, 5), _lm(0x222232));
+    pole.position.set(pos.x, pos.y + 3.5, pos.z); gr.add(pole);
+    // Lamp head
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.4, 0.5), _em(nc));
+    lamp.position.set(pos.x, pos.y + 7.2, pos.z); gr.add(lamp);
+  });
+
+  // Large billboard frames along track every 60 points
+  decorEvery(pts, lefts, rights, 60, 14, g, (pos, side, right, gr) => {
+    const nc = pick(neons);
+    // Frame uprights
+    for (const ox of [-5, 5]) {
+      const up = new THREE.Mesh(new THREE.BoxGeometry(0.6, 12, 0.6), _lm(0x1A1A2A));
+      up.position.set(pos.x + right.x*ox, pos.y + 6, pos.z + right.z*ox); gr.add(up);
+    }
+    // Billboard panel
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(12, 5, 0.4), _em(nc));
+    panel.position.set(pos.x, pos.y + 10, pos.z); gr.add(panel);
+  });
+
+  // Distant city haze — large faint emissive boxes on the horizon
+  const horizonCols = [0x001122, 0x110022, 0x002211];
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+    const r = 900, hh = 60 + (Math.floor(a * 10) % 80);
+    const hx = Math.cos(a) * r, hz = Math.sin(a) * r;
+    const haze = new THREE.Mesh(new THREE.BoxGeometry(120, hh, 60),
+      new THREE.MeshStandardMaterial({ color: horizonCols[Math.floor(a) % 3],
+        emissive: neons[Math.floor(a * 2) % neons.length], emissiveIntensity: 0.15,
+        metalness: 0, roughness: 1 }));
+    haze.position.set(hx, hh * 0.5, hz); g.add(haze);
+  }
+}
+
 function buildDecorations(theme, pts, lefts, rights, group) {
   if (theme==='pirate')        buildPirateDecor(pts,lefts,rights,group);
   else if (theme==='space')    buildSpaceDecor(pts,lefts,rights,group);
+  else if (theme==='city')     buildNeonCityDecor(pts,lefts,rights,group);
   else                         buildMedievalDecor(pts,lefts,rights,group);
 }
 
@@ -601,7 +714,7 @@ function buildTrack(wpts, theme='space') {
   splinePoints = pts;
   const n = pts.length, hw = TRACK_WIDTH / 2;
 
-  const roadCols = { pirate:0xB89248, space:0x1A1A2A, medieval:0x555566 };
+  const roadCols = { pirate:0xB89248, space:0x1A1A2A, medieval:0x555566, city:0x090912 };
   const mRoad  = new THREE.MeshLambertMaterial({color:roadCols[theme]||0x1A1A2A, flatShading:true, side:THREE.DoubleSide});
   // Checkered finish-line texture (canvas)
   const flCanvas = document.createElement('canvas');
@@ -641,7 +754,7 @@ function buildTrack(wpts, theme='space') {
   trackGroup.add(rm); roadMesh=rm;
 
   // Barriers — theme coloured
-  const barPalettes={pirate:[0xEEDDCC,0x6B3A2A], space:[0x00FFFF,0x8800FF], medieval:[0x888877,0x5A3A15]};
+  const barPalettes={pirate:[0xEEDDCC,0x6B3A2A], space:[0x00FFFF,0x8800FF], medieval:[0x888877,0x5A3A15], city:[0x00FFEE,0xFF00BB]};
   const [bC1,bC2]=barPalettes[theme]||barPalettes.space;
   const BARRIER_H=1.2;
   const mBA=new THREE.MeshLambertMaterial({color:bC1,flatShading:true,side:THREE.DoubleSide});
@@ -796,7 +909,7 @@ const carState = { pos: new THREE.Vector3(), heading: 0, speed: 0 };
 // ── Lap timing ────────────────────────────────────────────────────
 const CP_COUNT = 4;
 let cpIndices=[], cpPassed=[];
-let currentLap=1, lapStartTime=0, bestLap=Infinity, lastLap=Infinity;
+let currentLap=1, raceLaps=3, lapStartTime=0, bestLap=Infinity, lastLap=Infinity;
 let lapTimes=[], wrongWay=false, lastSegment=0, nearestSegIdx=0;
 
 function setupCheckpoints() {
@@ -827,7 +940,7 @@ function completeLap() {
   lapTimes.push(ms);
   if(ms<bestLap) bestLap=ms;
   lastLap=ms; lapStartTime=now; cpPassed.fill(false);
-  if(currentLap>=settings.laps){endRace();return;}
+  if(currentLap>=raceLaps){endRace();return;}
   currentLap++;
 }
 function fmtTime(ms) {
@@ -990,7 +1103,7 @@ function drawTrackPreview(canvas, waypoints) {
 function updateHUD() {
   const kmh = Math.abs(car.speed) * 3.6;
   document.getElementById('hud-spd').innerHTML=`${Math.round(kmh)} <small style="font-size:12px;color:rgba(255,255,255,0.45)">km/h</small>`;
-  document.getElementById('hud-lap').textContent=`${currentLap} / ${settings.laps}`;
+  document.getElementById('hud-lap').textContent=`${currentLap} / ${raceLaps}`;
   document.getElementById('hud-time').textContent=fmtTime(performance.now()-lapStartTime);
   document.getElementById('hud-best').textContent=fmtTime(bestLap);
   document.getElementById('hud-last').textContent=fmtTime(lastLap);
@@ -1027,12 +1140,14 @@ function startRace(idx) {
     pirate:   {bg:0x3A8ECC, hTop:0xAADDFF, hBot:0xC8A848},
     space:    {bg:0x000008, hTop:0x112244, hBot:0x000000},
     medieval: {bg:0x5577AA, hTop:0xAABBCC, hBot:0x334422},
+    city:     {bg:0x020008, hTop:0x18003A, hBot:0x000000},
   };
   const sk=skies[track.theme]||skies.space;
   scene.background=new THREE.Color(sk.bg); renderer.setClearColor(sk.bg);
   hemLight.color.setHex(sk.hTop); hemLight.groundColor.setHex(sk.hBot);
   spaceBgGroup.visible=(track.theme==='space');
   scene.fog=null;
+  raceLaps = track.forceLaps || settings.laps;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
   resetCar(); hideAllScreens();
