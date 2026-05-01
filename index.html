@@ -94,7 +94,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.4.6</div>
+<div id="version-tag">v1.5.0</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -150,33 +150,36 @@ const settings = { fog: true, camera: 'chase', laps: 3 };
 // ── Tracks ────────────────────────────────────────────────────────
 const TRACKS = [
   {
-    name: 'Pulsar Station', desc: 'Technical flow through\nfloating space platforms', tag: 'TECHNICAL',
-    carColor: 0x00d2be, wingColor: 0x111111,
-    // XZ scaled ×2.5 from original — much larger track
+    name: 'Skull Cove',
+    desc: 'Pirate shores &amp; sunken treasure',
+    tag: 'PIRATE',
+    theme: 'pirate',
     waypoints: [
-      [   0, 0,   0],[ 75, 0, -25],[150, 0, -30],[210, 2,  -5],[235, 6,  50],
-      [ 215,10, 110],[160,13, 150],[ 85,13, 160],[  10,10, 140],[-40, 6,  95],
-      [ -50, 2,  40],[-25, 0,  -5],
+      [  0,0,  0],[ 70,0, 55],[125,1,120],[135,4,195],
+      [ 90,6,255],[ 15,7,275],[-60,5,250],[-95,3,190],
+      [-100,1,120],[-65,0, 55],[-15,0, 12]
     ]
   },
   {
-    name: 'Celestia Ring', desc: 'High-speed orbit around\na collapsed star', tag: 'HIGH SPEED',
-    carColor: 0xe8002d, wingColor: 0xffff00,
-    // XZ scaled ×2.5 — long sweeping oval
+    name: 'Nebula Run',
+    desc: 'Speed through a dying star system',
+    tag: 'SPACE',
+    theme: 'space',
     waypoints: [
-      [   0, 0,   0],[ 95, 0,  20],[175, 1,  50],[225, 4, 105],[235, 6, 170],
-      [ 200, 8, 235],[138, 9, 270],[ 60, 8, 265],[ -10, 5, 230],[-45, 3, 170],
-      [ -45, 1, 100],[-10, 0,  45],
+      [  0, 0,  0],[100, 0, 40],[185, 8,110],[210,18,195],
+      [165,24,275],[ 75,26,315],[-25,22,295],[-95,15,250],
+      [-125, 8,165],[-95, 2, 75],[-40, 0, 25]
     ]
   },
   {
-    name: 'Dark Matter', desc: 'Twisty switchbacks\nthrough the void', tag: 'ENDURANCE',
-    carColor: 0x9b59b6, wingColor: 0xe056fd,
-    // XZ scaled ×2.5 — tight technical layout with proper elevation
+    name: 'Castle Keep',
+    desc: 'Race through the ancient fortress',
+    tag: 'MEDIEVAL',
+    theme: 'medieval',
     waypoints: [
-      [   0, 0,   0],[ 55, 1,  55],[ 95, 5,  80],[110,10,  55],[ 85,14,  10],
-      [  30,15, -35],[-20,13, -60],[-35, 9, -40],[-20, 5,   0],[  10, 3,  30],
-      [  30, 0,  20],
+      [  0,0,  0],[ 55,0, 65],[ 80,3,135],[ 50,5,200],
+      [-20,6,235],[-85,5,215],[-115,3,165],[-110,1, 95],
+      [-65,0, 45],[-20,0, 10]
     ]
   }
 ];
@@ -234,7 +237,7 @@ resize(); window.addEventListener('resize', resize);
 
 // ── Lighting ──────────────────────────────────────────────────────
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-scene.add(new THREE.HemisphereLight(0xffeeff, 0x223344, 0.6));
+const hemLight = new THREE.HemisphereLight(0xffeeff, 0x223344, 0.6); scene.add(hemLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.8); sun.position.set(80, 200, 80); scene.add(sun);
 const fill = new THREE.DirectionalLight(0x8899ff, 0.5); fill.position.set(-100, 60, -80); scene.add(fill);
 
@@ -252,7 +255,8 @@ const fill = new THREE.DirectionalLight(0x8899ff, 0.5); fill.position.set(-100, 
   scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: true })));
 })();
 
-// ── Distant space objects ─────────────────────────────────────────
+// ── Distant space objects (shown only on space theme) ─────────────
+const spaceBgGroup = new THREE.Group(); scene.add(spaceBgGroup);
 (function() {
   const palettes = [
     [0x2a1a4a, 0x3a1060, 0x1a0a30],
@@ -277,7 +281,7 @@ const fill = new THREE.DirectionalLight(0x8899ff, 0.5); fill.position.set(-100, 
       color: pal[Math.floor(Math.random()*pal.length)], flatShading: true }));
     mesh.position.set(Math.cos(angle)*dist, y, Math.sin(angle)*dist);
     mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
-    scene.add(mesh);
+    spaceBgGroup.add(mesh);
   }
 })();
 
@@ -290,97 +294,232 @@ let splinePoints = [];
 let roadMesh     = null;    // single merged road mesh — used for raycasting
 const trackGroup = new THREE.Group(); scene.add(trackGroup);
 
-// ── Road piece tiling (modular road pack) ─────────────────────────
-const roadTileGroup = new THREE.Group(); scene.add(roadTileGroup);
-let roadPieceTemplate = null;   // cloned per-segment
-let roadPieceLen  = 10;         // measured length of one piece
-let roadPieceRot  = 0;          // extra Y rotation if piece runs along X
-
-new GLTFLoader().load('./road.glb', gltf => {
-  // Find the largest-footprint non-cylinder mesh — that's the road surface
-  let best = null, bestArea = 0;
-  gltf.scene.traverse(o => {
-    if (!o.isMesh || /cyl/i.test(o.name)) return;
-    const b = new THREE.Box3().setFromObject(o);
-    const s = b.getSize(new THREE.Vector3());
-    if (s.x * s.z > bestArea) { bestArea = s.x * s.z; best = o; }
-  });
-  if (!best && gltf.scene.children.length) best = gltf.scene.children[0];
-  if (!best) return;
-
-  // Fix encoding on textures so colours are correct
-  best.traverse(o => {
-    if (o.isMesh) {
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach(m => {
-        if (m.map) { m.map.encoding = THREE.sRGBEncoding; m.map.needsUpdate = true; }
-        m.needsUpdate = true;
-      });
-    }
-  });
-
-  // Measure piece: determine which axis is forward
-  const b = new THREE.Box3().setFromObject(best);
-  const s = b.getSize(new THREE.Vector3());
-  const c = b.getCenter(new THREE.Vector3());
-  const xFwd = s.x > s.z;
-  roadPieceLen = xFwd ? s.x : s.z;
-  roadPieceRot = xFwd ? Math.PI / 2 : 0;
-
-  // Normalise: centre the mesh at local origin and sit bottom on Y=0
-  best.position.sub(c);
-  best.position.y += s.y / 2;
-
-  roadPieceTemplate = best;
-  if (splinePoints.length) tileRoadPieces();
-}, undefined, e => console.warn('road.glb load error', e));
-
-function tileRoadPieces() {
-  while (roadTileGroup.children.length) roadTileGroup.remove(roadTileGroup.children[0]);
-  if (!roadPieceTemplate || !splinePoints.length) return;
-
-  const n   = splinePoints.length;
-  // Scale piece so its width matches track width
-  const b   = new THREE.Box3().setFromObject(roadPieceTemplate);
-  const s   = b.getSize(new THREE.Vector3());
-  const pieceWid = roadPieceRot ? s.z : s.x;
-  const scale = TRACK_WIDTH / pieceWid;
-  const step  = roadPieceLen * scale * 0.98; // tiny overlap to avoid gaps
-
-  let acc = step; // trigger first placement immediately
-  for (let i = 0; i < n - 1; i++) {
-    acc += splinePoints[i].distanceTo(splinePoints[i + 1]);
-    if (acc < step) continue;
-    acc -= step;
-
-    const piece = roadPieceTemplate.clone();
-    piece.scale.setScalar(scale);
-    const p   = splinePoints[i];
-    const q   = splinePoints[(i + 1) % n];
-    const dir = new THREE.Vector3().subVectors(q, p).normalize();
-    piece.position.set(p.x, p.y, p.z);
-    piece.rotation.y = Math.atan2(dir.x, dir.z) + roadPieceRot;
-    roadTileGroup.add(piece);
-  }
-}
-
 function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
-
 function buildSpline(wpts) {
-  const curve = new THREE.CatmullRomCurve3(wpts.map(v3), true, 'catmullrom', 0.5);
-  return curve.getPoints(wpts.length * 24);
+  return new THREE.CatmullRomCurve3(wpts.map(v3), true, 'catmullrom', 0.5).getPoints(wpts.length * 24);
 }
-
 function addQuad([a,b,c,d], mat) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(
-    [a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z,
-     a.x,a.y,a.z, c.x,c.y,c.z, d.x,d.y,d.z], 3));
+    [a.x,a.y,a.z, b.x,b.y,b.z, c.x,c.y,c.z, a.x,a.y,a.z, c.x,c.y,c.z, d.x,d.y,d.z], 3));
   geo.computeVertexNormals();
   trackGroup.add(new THREE.Mesh(geo, mat));
 }
 
-function buildTrack(wpts) {
+// ── Theme decoration builders ──────────────────────────────────────
+const _lm = (c) => new THREE.MeshLambertMaterial({color:c, flatShading:true});
+const _em = (c) => new THREE.MeshStandardMaterial({color:c, emissive:c, emissiveIntensity:2.5, metalness:0, roughness:1});
+
+function decorEvery(pts, lefts, rights, step, outGap, group, fn) {
+  for (let i=0, ctr=0; i < pts.length-step; i += step, ctr++) {
+    const side = (ctr%2) ? 1 : -1;
+    const edge = (side>0 ? rights : lefts)[Math.min(i, pts.length-1)];
+    const p = pts[i], pn = pts[Math.min(i+step, pts.length-1)];
+    const fwd = new THREE.Vector3().subVectors(pn,p).normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
+    fn(edge.clone().addScaledVector(right, side*outGap), side, right, group);
+  }
+}
+
+// ── PIRATE — Skull Cove ───────────────────────────────────────────
+function buildPirateDecor(pts, lefts, rights, g) {
+  // Sandy ground
+  const gnd = new THREE.Mesh(new THREE.PlaneGeometry(700,700,3,3), _lm(0xC8A848));
+  gnd.rotation.x = -Math.PI/2; gnd.position.y = -0.6; g.add(gnd);
+  // Ocean patch
+  const mid = pts[Math.floor(pts.length*0.45)];
+  const oc = new THREE.Mesh(new THREE.PlaneGeometry(450,350), _lm(0x1A5A8A));
+  oc.rotation.x = -Math.PI/2; oc.position.set(mid.x+250,-1,mid.z+80); g.add(oc);
+  // Palm trees
+  decorEvery(pts,lefts,rights, 26, 7, g, (pos,side,right,gr) => {
+    pos.addScaledVector(right,side*2); addPalmTree(pos,gr);
+  });
+  // Skull boulders
+  decorEvery(pts,lefts,rights, 46, 9, g, (pos,side,right,gr) => {
+    const r=2+Math.random()*2.5;
+    const m=new THREE.Mesh(new THREE.IcosahedronGeometry(r,0), _lm(0x888870));
+    m.position.copy(pos); m.position.y+=r*0.5; m.rotation.y=Math.random()*Math.PI; gr.add(m);
+  });
+  // Treasure chests
+  decorEvery(pts,lefts,rights, 63, 5, g, (pos,side,right,gr) => addTreasureChest(pos,gr));
+  // Cannons
+  decorEvery(pts,lefts,rights, 88, 4, g, (pos,side,right,gr) => addCannon(pos,right,side,gr));
+  // Ship in background
+  addShip(new THREE.Vector3(mid.x+130, 0, mid.z+100), g);
+}
+function addPalmTree(p, g) {
+  const gr=new THREE.Group(), h=7+Math.random()*5;
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(.22,.38,h,6), _lm(0x7A4A22));
+  t.position.y=h/2; gr.add(t);
+  const lm=_lm(0x1A7A1A);
+  for(let i=0;i<6;i++){
+    const a=i/6*Math.PI*2, l=new THREE.Mesh(new THREE.ConeGeometry(3.2,1.5,4), lm);
+    l.position.set(Math.cos(a)*1.8, h+.6, Math.sin(a)*1.8);
+    l.rotation.z=.65; l.rotation.y=a; gr.add(l);
+  }
+  const top=new THREE.Mesh(new THREE.SphereGeometry(.5,5,4), lm); top.position.y=h+1.3; gr.add(top);
+  gr.position.copy(p); gr.rotation.y=Math.random()*Math.PI*2; g.add(gr);
+}
+function addTreasureChest(p, g) {
+  const gr=new THREE.Group();
+  gr.add(new THREE.Mesh(new THREE.BoxGeometry(2,1.4,1.2), _lm(0x5A2A12)));
+  const lid=new THREE.Mesh(new THREE.BoxGeometry(2,.5,1.2), _lm(0x7A3A1A)); lid.position.y=.95; gr.add(lid);
+  const band=new THREE.Mesh(new THREE.BoxGeometry(2.1,.25,1.3), _lm(0xC8A820)); band.position.y=.3; gr.add(band);
+  const lock=new THREE.Mesh(new THREE.BoxGeometry(.4,.4,.3), _lm(0xC8A820)); lock.position.set(0,.95,.65); gr.add(lock);
+  gr.position.copy(p); gr.position.y+=.7; gr.rotation.y=Math.random()*Math.PI; g.add(gr);
+}
+function addCannon(p, right, side, g) {
+  const gr=new THREE.Group();
+  const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.28,.35,2.5,8), _lm(0x222222));
+  barrel.rotation.z=Math.PI/2*side; gr.add(barrel);
+  const wh1=new THREE.Mesh(new THREE.CylinderGeometry(.7,.7,.3,8), _lm(0x5A3A1A));
+  wh1.position.z=.6; wh1.rotation.x=Math.PI/2; gr.add(wh1);
+  const wh2=wh1.clone(); wh2.position.z=-.6; gr.add(wh2);
+  gr.position.copy(p); gr.position.y+=.4; g.add(gr);
+}
+function addShip(p, g) {
+  const wm=_lm(0x4A2A0A), bm=_lm(0x2A1808);
+  const hull=new THREE.Mesh(new THREE.BoxGeometry(26,5,10), bm); hull.position.y=-.5;
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(24,.5,8), wm); deck.position.y=2.25;
+  const mast=new THREE.Mesh(new THREE.CylinderGeometry(.3,.4,22,6), wm); mast.position.set(0,13.25,0);
+  const boom=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,15,6), wm); boom.rotation.z=Math.PI/2; boom.position.y=20;
+  const sail=new THREE.Mesh(new THREE.PlaneGeometry(13,8), new THREE.MeshLambertMaterial({color:0xEEDDBB,side:THREE.DoubleSide}));
+  sail.position.set(0,16,.3);
+  const flag=new THREE.Mesh(new THREE.PlaneGeometry(3,2), new THREE.MeshLambertMaterial({color:0x111111,side:THREE.DoubleSide}));
+  flag.position.set(1.5,23,0);
+  const bow=new THREE.Mesh(new THREE.CylinderGeometry(0,4,5,4), bm); bow.rotation.z=Math.PI/2; bow.position.set(14,0,0);
+  const gr=new THREE.Group(); gr.add(hull,deck,mast,boom,sail,flag,bow);
+  gr.position.copy(p); gr.rotation.y=.4; g.add(gr);
+}
+
+// ── SPACE — Nebula Run ────────────────────────────────────────────
+function buildSpaceDecor(pts, lefts, rights, g) {
+  // Bumpy asteroid ground
+  const grGeo=new THREE.PlaneGeometry(700,700,14,14);
+  const gp=grGeo.attributes.position;
+  for(let i=0;i<gp.count;i++) gp.setZ(i,(Math.random()-.5)*4);
+  grGeo.computeVertexNormals();
+  const gnd=new THREE.Mesh(grGeo, _lm(0x0D0D1A));
+  gnd.rotation.x=-Math.PI/2; gnd.position.y=-0.9; g.add(gnd);
+  // Crater rings
+  decorEvery(pts,lefts,rights, 36, 13, g, (pos,side,right,gr) => {
+    const r=6+Math.random()*9;
+    const cr=new THREE.Mesh(new THREE.TorusGeometry(r,.7,4,14), _lm(0x2A2A3A));
+    cr.rotation.x=-Math.PI/2; cr.position.copy(pos); cr.position.y=.2; gr.add(cr);
+  });
+  // Alien rock spires
+  decorEvery(pts,lefts,rights, 22, 5, g, (pos,side,right,gr) => {
+    const h=6+Math.random()*14;
+    const cols=[0x2A1A4A,0x1A3A5A,0x3A1A3A,0x1A4A3A];
+    const sp=new THREE.Mesh(new THREE.ConeGeometry(1.2+Math.random()*.8,h,5), _lm(cols[Math.floor(Math.random()*4)]));
+    sp.position.copy(pos); sp.position.y+=h/2; sp.rotation.y=Math.random()*Math.PI; gr.add(sp);
+  });
+  // Glowing neon track markers
+  const cols=[0x00FFFF,0xFF00FF,0x00FF88,0xFF4400];
+  decorEvery(pts,lefts,rights, 50, 1.5, g, (pos,side,right,gr) => {
+    const col=cols[Math.floor(Math.random()*4)];
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(1.1,8,6), _em(col));
+    orb.position.copy(pos); orb.position.y+=2.5; gr.add(orb);
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,2.5,5), _lm(0x333344));
+    pole.position.copy(pos); pole.position.y+=1.25; gr.add(pole);
+  });
+  // Space stations
+  const m1=pts[Math.floor(pts.length*.3)], m2=pts[Math.floor(pts.length*.7)];
+  addSpaceStation(new THREE.Vector3(m1.x+140,38,m1.z+60), g);
+  addSpaceStation(new THREE.Vector3(m2.x-120,28,m2.z-80), g);
+  // Satellite dishes
+  decorEvery(pts,lefts,rights, 76, 10, g, (pos,side,right,gr) => addSatellite(pos,gr));
+}
+function addSpaceStation(p, g) {
+  const core=new THREE.Mesh(new THREE.OctahedronGeometry(13,0), _lm(0x3A4A5A));
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(24,2,6,14), _lm(0x2A3A4A));
+  const arm1=new THREE.Mesh(new THREE.BoxGeometry(44,1.5,1.5), _lm(0x4A5A6A));
+  const arm2=arm1.clone(); arm2.rotation.y=Math.PI/2;
+  const pan1=new THREE.Mesh(new THREE.BoxGeometry(15,.5,5.5), _lm(0x1A3A8A)); pan1.position.x=24;
+  const pan2=pan1.clone(); pan2.position.x=-24;
+  const gr=new THREE.Group(); gr.add(core,ring,arm1,arm2,pan1,pan2);
+  gr.position.copy(p); gr.rotation.z=.25; gr.rotation.y=Math.random()*Math.PI; g.add(gr);
+}
+function addSatellite(p, g) {
+  const gr=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.5,1.5,2), _lm(0x4A5A6A));
+  const dish=new THREE.Mesh(new THREE.ConeGeometry(2.5,.7,8), _lm(0x8AAABB)); dish.rotation.x=Math.PI/2; dish.position.z=1.6;
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,5,6), _lm(0x555566)); pole.position.y=-2.5;
+  gr.add(body,dish,pole);
+  gr.position.copy(p); gr.position.y+=7;
+  gr.rotation.set(Math.random()*.6, Math.random()*Math.PI, Math.random()*.6); g.add(gr);
+}
+
+// ── MEDIEVAL — Castle Keep ────────────────────────────────────────
+function buildMedievalDecor(pts, lefts, rights, g) {
+  // Grass ground
+  const gnd=new THREE.Mesh(new THREE.PlaneGeometry(700,700,3,3), _lm(0x2A5A18));
+  gnd.rotation.x=-Math.PI/2; gnd.position.y=-0.6; g.add(gnd);
+  // Trees
+  decorEvery(pts,lefts,rights, 20, 5, g, (pos,side,right,gr) => addMedTree(pos,gr));
+  // Castle towers
+  decorEvery(pts,lefts,rights, 56, 8, g, (pos,side,right,gr) => addTower(pos,gr));
+  // Stone wall sections
+  decorEvery(pts,lefts,rights, 32, 2.5, g, (pos,side,right,gr) => addStoneWall(pos,right,gr));
+  // Torch posts (close to track edge)
+  decorEvery(pts,lefts,rights, 24, 0.5, g, (pos,side,right,gr) => addTorch(pos,gr));
+  // Market stalls
+  const mid=pts[Math.floor(pts.length*.5)];
+  addMarketStall(new THREE.Vector3(mid.x+45,mid.y,mid.z+35), g);
+  addMarketStall(new THREE.Vector3(mid.x-55,mid.y,mid.z-25), g);
+}
+function addMedTree(p, g) {
+  const gr=new THREE.Group();
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(.28,.4,3.5,6), _lm(0x5A3A15)); t.position.y=1.75; gr.add(t);
+  const c1=new THREE.Mesh(new THREE.ConeGeometry(3.8,7,7), _lm(0x1A5A0A)); c1.position.y=7.5; gr.add(c1);
+  const c2=new THREE.Mesh(new THREE.ConeGeometry(3,5,7), _lm(0x228B22)); c2.position.y=10.5; gr.add(c2);
+  gr.position.copy(p); gr.rotation.y=Math.random()*Math.PI*2; g.add(gr);
+}
+function addTower(p, g) {
+  const sm=_lm(0x666655);
+  const h=14+Math.random()*9;
+  const tow=new THREE.Mesh(new THREE.CylinderGeometry(3.5,4.2,h,8), sm); tow.position.y=h/2;
+  const cH=6, cone=new THREE.Mesh(new THREE.ConeGeometry(4,cH,8), _lm(0x8B2222)); cone.position.y=h+cH/2;
+  const bats=new THREE.Group(); bats.position.y=h;
+  for(let i=0;i<8;i++){const a=i/8*Math.PI*2,bat=new THREE.Mesh(new THREE.BoxGeometry(1.2,2,1.2),sm);bat.position.set(Math.cos(a)*3.3,1,Math.sin(a)*3.3);bats.add(bat);}
+  const fp=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,4,5), _lm(0x888877)); fp.position.y=h+cH+2;
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(3,2), new THREE.MeshLambertMaterial({color:0xCC2222,side:THREE.DoubleSide})); fl.position.set(1.5,h+cH+4,0);
+  const gr=new THREE.Group(); gr.add(tow,cone,bats,fp,fl);
+  gr.position.copy(p); gr.rotation.y=Math.random()*Math.PI; g.add(gr);
+}
+function addStoneWall(p, right, g) {
+  const gr=new THREE.Group();
+  for(let i=-1;i<=1;i++){
+    const bl=new THREE.Mesh(new THREE.BoxGeometry(2.4,2.5,2), _lm(0x777766));
+    bl.position.set(right.x*i*2.4, 1.25, right.z*i*2.4); gr.add(bl);
+  }
+  gr.position.copy(p); g.add(gr);
+}
+function addTorch(p, g) {
+  const gr=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(.1,.12,3.5,6), _lm(0x5A3A15)); pole.position.y=1.75; gr.add(pole);
+  const flame=new THREE.Mesh(new THREE.SphereGeometry(.32,6,5), _em(0xFF5500)); flame.position.y=3.9; gr.add(flame);
+  gr.position.copy(p); g.add(gr);
+}
+function addMarketStall(p, g) {
+  const gr=new THREE.Group();
+  const base=new THREE.Mesh(new THREE.BoxGeometry(8,.3,5), _lm(0x7A5A2A));
+  const back=new THREE.Mesh(new THREE.BoxGeometry(8,3,.3), _lm(0x7A5A2A)); back.position.set(0,1.5,-2.5);
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(8.4,.3,5.5), _lm(0xCC3322)); roof.rotation.x=-.35; roof.position.set(0,3.3,.5);
+  gr.add(base,back,roof);
+  const boxCols=[0x8B2020,0x20208B,0x208B20,0xAA8820];
+  for(let i=-2;i<=2;i++){const bx=new THREE.Mesh(new THREE.BoxGeometry(1.2,.8,1),_lm(boxCols[Math.abs(i)%4]));bx.position.set(i*1.5,.55,.5);gr.add(bx);}
+  gr.position.copy(p); gr.rotation.y=Math.random()*Math.PI*.5; g.add(gr);
+}
+
+function buildDecorations(theme, pts, lefts, rights, group) {
+  if (theme==='pirate')        buildPirateDecor(pts,lefts,rights,group);
+  else if (theme==='space')    buildSpaceDecor(pts,lefts,rights,group);
+  else                         buildMedievalDecor(pts,lefts,rights,group);
+}
+
+// ── Track geometry builder ────────────────────────────────────────
+function buildTrack(wpts, theme='space') {
   while (trackGroup.children.length) trackGroup.remove(trackGroup.children[0]);
   roadMesh = null;
 
@@ -388,76 +527,64 @@ function buildTrack(wpts) {
   splinePoints = pts;
   const n = pts.length, hw = TRACK_WIDTH / 2;
 
-  const mRoad   = new THREE.MeshLambertMaterial({ color: 0x1c2340, flatShading: true, side: THREE.DoubleSide });
-  const mSide   = new THREE.MeshLambertMaterial({ color: 0x0d1120, flatShading: true, side: THREE.DoubleSide });
-  const mBottom = new THREE.MeshLambertMaterial({ color: 0x0a0e1a, flatShading: true, side: THREE.DoubleSide });
-  const mTrimL  = new THREE.MeshLambertMaterial({ color: 0x00cfff, flatShading: true });
-  const mTrimR  = new THREE.MeshLambertMaterial({ color: 0xff3366, flatShading: true });
-  const mStart  = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const roadCols = { pirate:0xB89248, space:0x1A1A2A, medieval:0x555566 };
+  const mRoad  = new THREE.MeshLambertMaterial({color:roadCols[theme]||0x1A1A2A, flatShading:true, side:THREE.DoubleSide});
+  const mStart = new THREE.MeshLambertMaterial({color:0xffffff});
 
-  const lefts = [], rights = [], fwds = [];
-  for (let i = 0; i < n; i++) {
-    const p = pts[i], pN = pts[(i+1)%n];
-    const fwd   = new THREE.Vector3().subVectors(pN, p).normalize();
-    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0,1,0)).normalize();
-    lefts.push(new THREE.Vector3().copy(p).addScaledVector(right, -hw));
-    rights.push(new THREE.Vector3().copy(p).addScaledVector(right,  hw));
+  const lefts=[], rights=[], fwds=[];
+  for (let i=0;i<n;i++) {
+    const p=pts[i], pN=pts[(i+1)%n];
+    const fwd=new THREE.Vector3().subVectors(pN,p).normalize();
+    const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();
+    lefts.push(p.clone().addScaledVector(right,-hw));
+    rights.push(p.clone().addScaledVector(right, hw));
     fwds.push(fwd);
   }
 
-  // ── Road surface — one merged BufferGeometry, saved as roadMesh ─
-  // Winding: counter-clockwise from above so normals point UP
+  // Road surface — visible AND used for raycasting
   const rv=[], ri=[];
-  for (let i = 0; i < n-1; i++) {
-    const b = rv.length / 3;
-    [lefts[i], rights[i], rights[i+1], lefts[i+1]].forEach(v => rv.push(v.x, v.y, v.z));
-    // CCW winding viewed from above → normal points up
-    ri.push(b, b+2, b+1,  b, b+3, b+2);
+  for (let i=0;i<n-1;i++) {
+    const b=rv.length/3;
+    [lefts[i],rights[i],rights[i+1],lefts[i+1]].forEach(v=>rv.push(v.x,v.y,v.z));
+    ri.push(b,b+2,b+1, b,b+3,b+2);
   }
-  const rGeo = new THREE.BufferGeometry();
-  rGeo.setAttribute('position', new THREE.Float32BufferAttribute(rv, 3));
-  rGeo.setIndex(ri);
-  rGeo.computeVertexNormals();
-  const rm = new THREE.Mesh(rGeo, mRoad);
-  rm.visible = false; // hidden — used only for raycasting, road.glb tiles are the visual
-  trackGroup.add(rm);
-  roadMesh = rm;   // ← raycaster target
+  const rGeo=new THREE.BufferGeometry();
+  rGeo.setAttribute('position',new THREE.Float32BufferAttribute(rv,3));
+  rGeo.setIndex(ri); rGeo.computeVertexNormals();
+  const rm=new THREE.Mesh(rGeo,mRoad);
+  rm.visible=true;
+  trackGroup.add(rm); roadMesh=rm;
 
-  // Platform sides/bottom/trim removed — road.glb tiles are the visual road surface.
-
-  // ── Barriers / railings along both edges ─────────────────────
-  const BARRIER_H = 0.9;
-  const mBarW = new THREE.MeshLambertMaterial({ color: 0xfafafa, flatShading: true, side: THREE.DoubleSide });
-  const mBarR = new THREE.MeshLambertMaterial({ color: 0xcc1111, flatShading: true, side: THREE.DoubleSide });
-  const blvW=[],bliW=[],blvR=[],bliR=[];
-  const brvW=[],briW=[],brvR=[],briR=[];
-  for (let i = 0; i < n-1; i++) {
-    const stripe = Math.floor(i / 5) % 2; // alternate every 5 segments
-    const L0=lefts[i],  L1=lefts[i+1];
-    const R0=rights[i], R1=rights[i+1];
-    const LT0=new THREE.Vector3(L0.x,L0.y+BARRIER_H,L0.z);
-    const LT1=new THREE.Vector3(L1.x,L1.y+BARRIER_H,L1.z);
-    const RT0=new THREE.Vector3(R0.x,R0.y+BARRIER_H,R0.z);
-    const RT1=new THREE.Vector3(R1.x,R1.y+BARRIER_H,R1.z);
-    const lv=stripe?blvR:blvW, li=stripe?bliR:bliW;
-    const rv=stripe?brvR:brvW, ri=stripe?briR:briW;
-    const lb=lv.length/3; [L0,L1,LT0,LT1].forEach(p=>lv.push(p.x,p.y,p.z));
-    li.push(lb,lb+1,lb+2, lb+1,lb+3,lb+2);
-    const rb=rv.length/3; [R0,R1,RT0,RT1].forEach(p=>rv.push(p.x,p.y,p.z));
-    ri.push(rb,rb+2,rb+1, rb+1,rb+2,rb+3);
+  // Barriers — theme coloured
+  const barPalettes={pirate:[0xEEDDCC,0x6B3A2A], space:[0x00FFFF,0x8800FF], medieval:[0x888877,0x5A3A15]};
+  const [bC1,bC2]=barPalettes[theme]||barPalettes.space;
+  const BARRIER_H=1.2;
+  const mBA=new THREE.MeshLambertMaterial({color:bC1,flatShading:true,side:THREE.DoubleSide});
+  const mBB=new THREE.MeshLambertMaterial({color:bC2,flatShading:true,side:THREE.DoubleSide});
+  const blA=[],biA=[],blB=[],biB=[], brA=[],briA=[],brB=[],briB=[];
+  for(let i=0;i<n-1;i++){
+    const s=Math.floor(i/5)%2;
+    const L0=lefts[i],L1=lefts[i+1],R0=rights[i],R1=rights[i+1];
+    const LT0=new THREE.Vector3(L0.x,L0.y+BARRIER_H,L0.z),LT1=new THREE.Vector3(L1.x,L1.y+BARRIER_H,L1.z);
+    const RT0=new THREE.Vector3(R0.x,R0.y+BARRIER_H,R0.z),RT1=new THREE.Vector3(R1.x,R1.y+BARRIER_H,R1.z);
+    const lv=s?blB:blA,li=s?biB:biA,rv2=s?brB:brA,ri2=s?briB:briA;
+    const lb=lv.length/3;[L0,L1,LT0,LT1].forEach(p=>lv.push(p.x,p.y,p.z));li.push(lb,lb+1,lb+2,lb+1,lb+3,lb+2);
+    const rb=rv2.length/3;[R0,R1,RT0,RT1].forEach(p=>rv2.push(p.x,p.y,p.z));ri2.push(rb,rb+2,rb+1,rb+1,rb+2,rb+3);
   }
-  const mkBGeo=(v,i,m)=>{if(!i.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(i);g.computeVertexNormals();trackGroup.add(new THREE.Mesh(g,m));};
-  mkBGeo(blvW,bliW,mBarW); mkBGeo(blvR,bliR,mBarR);
-  mkBGeo(brvW,briW,mBarW); mkBGeo(brvR,briR,mBarR);
+  const mkB=(v,i,m)=>{if(!i.length)return;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setIndex(i);g.computeVertexNormals();trackGroup.add(new THREE.Mesh(g,m));};
+  mkB(blA,biA,mBA);mkB(blB,biB,mBB);mkB(brA,briA,mBA);mkB(brB,briB,mBB);
 
-  // ── Start/finish stripe ───────────────────────────────────────
+  // Start/finish stripe
   const sf=new THREE.Vector3().subVectors(pts[1],pts[0]).normalize();
   const sr=new THREE.Vector3().crossVectors(sf,new THREE.Vector3(0,1,0)).normalize();
-  for (let s=-1;s<=1;s+=2) {
-    const a=pts[0].clone().addScaledVector(sr,s*hw/2).setY(pts[0].y+0.06);
-    const b=pts[0].clone().addScaledVector(sr,s*hw  ).setY(pts[0].y+0.06);
+  for(let s=-1;s<=1;s+=2){
+    const a=pts[0].clone().addScaledVector(sr,s*hw/2).setY(pts[0].y+0.08);
+    const b=pts[0].clone().addScaledVector(sr,s*hw  ).setY(pts[0].y+0.08);
     addQuad([a,b,b.clone().addScaledVector(sf,3),a.clone().addScaledVector(sf,3)],mStart);
   }
+
+  // Themed world decorations
+  buildDecorations(theme, pts, lefts, rights, trackGroup);
 }
 
 // ── Car model (GLB) ───────────────────────────────────────────────
@@ -770,7 +897,17 @@ function resetCar() {
 
 function startRace(idx) {
   activeTrack=idx; const track=TRACKS[idx];
-  buildTrack(track.waypoints); setupCheckpoints(); setupMinimap(); tileRoadPieces();
+  buildTrack(track.waypoints, track.theme); setupCheckpoints(); setupMinimap();
+  // Sky + lighting per theme
+  const skies={
+    pirate:   {bg:0x3A8ECC, hTop:0xAADDFF, hBot:0xC8A848},
+    space:    {bg:0x000008, hTop:0x112244, hBot:0x000000},
+    medieval: {bg:0x5577AA, hTop:0xAABBCC, hBot:0x334422},
+  };
+  const sk=skies[track.theme]||skies.space;
+  scene.background=new THREE.Color(sk.bg); renderer.setClearColor(sk.bg);
+  hemLight.color.setHex(sk.hTop); hemLight.groundColor.setHex(sk.hBot);
+  spaceBgGroup.visible=(track.theme==='space');
   scene.fog=null;
   currentLap=1; lapTimes=[]; bestLap=Infinity; lastLap=Infinity;
   wrongWay=false; racing=false; gameOver=false;
