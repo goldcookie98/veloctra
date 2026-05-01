@@ -138,7 +138,7 @@
 <div id="countdown"><div id="countdown-text">3</div></div>
 <div id="wrongway">WRONG WAY</div>
 
-<div id="version-tag">v1.6.2</div>
+<div id="version-tag">v1.6.3</div>
 
 <div class="screen" id="screen-menu">
   <div class="logo">VELOCTRA</div>
@@ -876,22 +876,27 @@ function resolveWall() {
   car.pos.x = cpx + rx * side * halfW;
   car.pos.z = cpz + rz * side * halfW;
 
-  // 5. Reflect only if actually moving into the wall
+  // 5. Scrape: cancel only the into-wall component of velocity, keep the
+  //    along-wall component. No reflection — car slides along the barrier.
   const wallNx = -rx * side; // inward normal
   const wallNz = -rz * side;
   const slipAngle = Math.atan2(car.slip, 1);
   const velH = car.heading + slipAngle;
   const vx = Math.sin(velH) * car.speed;
   const vz = Math.cos(velH) * car.speed;
-  const vdotN = vx*wallNx + vz*wallNz;
+  const vdotN = vx*wallNx + vz*wallNz; // < 0 means moving into wall
   if (vdotN < 0) {
-    // Reflect with restitution — perpendicular component flips, tangential kept
-    const e    = 0.38;
-    const nvx  = vx - (1 + e) * vdotN * wallNx;
-    const nvz  = vz - (1 + e) * vdotN * wallNz;
-    car.speed   = Math.sqrt(nvx*nvx + nvz*nvz) * 0.70;
-    car.heading = Math.atan2(nvx, nvz);
-    car.slip    = 0;
+    // Strip the wall-penetrating component, keep the sliding component
+    const nvx = vx - vdotN * wallNx;
+    const nvz = vz - vdotN * wallNz;
+    const newSpeed = Math.sqrt(nvx*nvx + nvz*nvz);
+    if (newSpeed > 0.5) {
+      car.heading = Math.atan2(nvx, nvz);
+      car.speed   = newSpeed * 0.82; // scrape friction
+    } else {
+      car.speed *= 0.5;
+    }
+    car.slip = 0;
   }
 }
 
